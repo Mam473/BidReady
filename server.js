@@ -8,6 +8,13 @@ const PORT = 3001;
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function truncate(text, maxChars) {
+  if (!text) return "";
+  return text.length > maxChars ? text.slice(0, maxChars) + "…" : text;
+}
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
@@ -25,7 +32,9 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
+    const genAI = new GoogleGenerativeAI(apiKey, {
+      apiVersion: "v1",
+    });
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     const today = new Date().toISOString().split("T")[0];
@@ -41,7 +50,10 @@ app.post("/api/analyze", async (req, res) => {
         }).join("\n")
       : "No documents uploaded.";
 
-    const prompt = `You are a Nigerian government procurement compliance expert. Evaluate the following SME's compliance with the tender requirements below.
+    const tenderBlock = truncate(tenderText, 2000);
+    const docsBlock   = truncate(docsSection, 800);
+
+    const prompt = `You are a Nigerian government procurement compliance expert. Evaluate the SME's compliance with the tender requirements below.
 
 TODAY'S DATE: ${today}
 
@@ -50,18 +62,17 @@ COMPANY PROFILE:
 - Industry: ${companyProfile.industry}
 - RC Number: ${companyProfile.rcNumber}
 
-COMPANY'S UPLOADED COMPLIANCE DOCUMENTS:
-${docsSection}
+COMPLIANCE DOCUMENTS:
+${docsBlock}
 
-TENDER REQUIREMENTS (${tenderName || "Procurement Tender"}):
-${tenderText}
+TENDER REQUIREMENTS (${truncate(tenderName || "Procurement Tender", 80)}):
+${tenderBlock}
 
 INSTRUCTIONS:
-1. Analyse the tender requirements against the company profile and submitted documents.
-2. Identify each specific compliance requirement from the tender (e.g., Tax Clearance Certificate, Company Registration, Experience, Financial Capacity, etc.).
-3. For each requirement, determine if it is MET, MISSING, or EXPIRED based on the uploaded documents.
-4. Calculate an overall compliance score from 0 to 100.
-5. Provide actionable procurement feedback — what the company must do to improve compliance.
+1. Identify each compliance requirement from the tender.
+2. For each requirement, determine if it is MET, MISSING, or EXPIRED based on the uploaded documents.
+3. Calculate an overall compliance score from 0 to 100.
+4. Provide actionable procurement feedback.
 
 Respond with ONLY a valid JSON object in this exact format:
 {
@@ -76,6 +87,8 @@ Respond with ONLY a valid JSON object in this exact format:
   "feedback": "<3-5 sentences of actionable procurement advice for this Nigerian SME>",
   "summary": "<one sentence overall assessment>"
 }`;
+
+    await delay(4000);
 
     const result = await model.generateContent(prompt);
     const text = result.response.text();
