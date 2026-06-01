@@ -1,0 +1,27 @@
+{
+  "name": "bidready-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "autoprefixer": "^10.5.0",
+    "cors": "^2.8.6",
+    "express": "^4.22.2",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
+    "lucide-react": "^1.17.0",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.4",
+    "postcss": "^8.5.15",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-router-dom": "^7.16.0",
+    "tailwindcss": "^4.3.0",
+    "vite": "^8.0.16"
+  }
+}
