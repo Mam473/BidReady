@@ -49,3 +49,7 @@ outputType = "webview"
 deploymentTarget = "autoscale"
 run = ["bash", "-c", "node server.js & cd client && npx serve dist -l 5000"]
 build = ["bash", "-c", "cd client && npm run build"]
+
+[[ports]]
+localPort = 5000
+externalPort = 80
