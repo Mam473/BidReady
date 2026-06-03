@@ -15,63 +15,131 @@ function truncate(text, maxChars) {
   return text.length > maxChars ? text.slice(0, maxChars) + "…" : text;
 }
 
+function buildDocumentList(documents) {
+  if (!documents || documents.length === 0) return "NONE — no compliance documents have been uploaded.";
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return documents.map((d) => {
+    let expiryStatus = "NO EXPIRY DATE SET";
+    let daysNote = "";
+
+    if (d.expiryDate) {
+      const expiry = new Date(d.expiryDate);
+      expiry.setHours(0, 0, 0, 0);
+      const diffDays = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+
+      if (diffDays < 0) {
+        expiryStatus = `EXPIRED (expired ${Math.abs(diffDays)} day${Math.abs(diffDays) === 1 ? "" : "s"} ago on ${d.expiryDate})`;
+      } else if (diffDays === 0) {
+        expiryStatus = `EXPIRED (expires today — ${d.expiryDate})`;
+      } else if (diffDays <= 30) {
+        expiryStatus = `EXPIRING SOON (${diffDays} day${diffDays === 1 ? "" : "s"} left — expires ${d.expiryDate})`;
+      } else {
+        expiryStatus = `VALID (expires ${d.expiryDate}, ${diffDays} days remaining)`;
+      }
+    }
+
+    return `  • Document Name: "${d.name}"
+    Type: ${d.type || "General/Unspecified"}
+    Expiry Status: ${expiryStatus}`;
+  }).join("\n\n");
+}
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-app.post("/api/analyze", (req, res) => {
-  const { companyProfile } = req.body;
-  const companyName = companyProfile?.name || "Your Company";
+app.post("/api/analyze", async (req, res) => {
+  const { companyProfile, documents, tenderText, tenderName } = req.body;
 
-  console.log(`[DEMO MODE] Returning mock analysis for: ${companyName}`);
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: "GEMINI_API_KEY is not configured in Secrets." });
+  }
+  if (!companyProfile || !tenderText) {
+    return res.status(400).json({ error: "companyProfile and tenderText are required." });
+  }
 
-  res.json({
-    success: true,
-    _mock: true,
-    result: {
-      score: 85,
-      summary: `${companyName} is largely compliant with the tender requirements but must urgently renew its Tax Clearance Certificate before submission.`,
-      requirements: [
-        {
-          name: "CAC Certificate of Incorporation",
-          status: "MET",
-          notes: "Valid company registration confirmed. RC number matches CAC records.",
-        },
-        {
-          name: "Tax Clearance Certificate",
-          status: "EXPIRED",
-          notes: "The submitted Tax Clearance Certificate has passed its validity date. An updated certificate covering the last three fiscal years is mandatory.",
-        },
-        {
-          name: "PENCOM Compliance Certificate",
-          status: "MET",
-          notes: "Pension remittance compliance certificate is current and valid.",
-        },
-        {
-          name: "NSITF Certificate",
-          status: "MET",
-          notes: "Nigeria Social Insurance Trust Fund certificate is valid and up to date.",
-        },
-        {
-          name: "Audited Financial Statements (3 years)",
-          status: "MISSING",
-          notes: "No audited financials were uploaded. Most federal tenders require statements for the last three financial years.",
-        },
-        {
-          name: "Company Profile & Key Personnel CVs",
-          status: "MET",
-          notes: "Company profile document is present and covers core personnel.",
-        },
-        {
-          name: "Evidence of Similar Previous Jobs",
-          status: "MISSING",
-          notes: "No letters of award or completion certificates for comparable contracts were provided.",
-        },
-      ],
-      feedback:
-        "Immediately obtain a renewed Tax Clearance Certificate from the Federal Inland Revenue Service (FIRS) — this is the most critical gap and will disqualify the bid if unresolved. Engage a certified auditor to finalise and certify financial statements for the last three years, as this is a standard Bureau of Public Procurement requirement. Compile at least three letters of award or job completion certificates from previous government or private-sector contracts to demonstrate relevant experience. Ensure all document expiry dates are tracked at least 60 days in advance to avoid last-minute disqualifications on future tenders. With these gaps addressed, your overall compliance posture is strong and competitive.",
-    },
-  });
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey, { apiVersion: "v1" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+    const today = new Date().toISOString().split("T")[0];
+    const docList = buildDocumentList(documents);
+    const tenderBlock = truncate(tenderText, 2000);
+
+    const prompt = `You are a strict Nigerian government procurement compliance officer. Your job is to evaluate whether an SME meets the requirements of a specific tender based ONLY on the documents they have actually uploaded.
+
+TODAY'S DATE: ${today}
+
+━━━ COMPANY PROFILE ━━━
+Company Name : ${companyProfile.name}
+Industry     : ${companyProfile.industry}
+RC Number    : ${companyProfile.rcNumber}
+
+━━━ UPLOADED COMPLIANCE DOCUMENTS ━━━
+The following is the COMPLETE list of documents this company has uploaded. Each entry shows the document name, its declared type, and its calculated expiry status based on today's date (${today}). If a document shows "EXPIRED", treat it as non-compliant — do NOT assume it is valid.
+
+${docList}
+
+━━━ TENDER REQUIREMENTS ━━━
+Tender: ${truncate(tenderName || "Government Procurement Tender", 100)}
+
+${tenderBlock}
+
+━━━ EVALUATION RULES ━━━
+Apply these rules strictly when setting each requirement's status:
+
+1. MET — The company has uploaded a document of the correct type AND its expiry status is VALID or NO EXPIRY DATE SET (for documents that don't expire like CAC Incorporation).
+2. EXPIRED — The company uploaded a document of the correct type BUT its expiry status is EXPIRED or EXPIRING SOON. This includes Tax Clearance Certificate, PENCOM Certificate, NSITF Certificate, ITF Certificate, and any other time-limited compliance document.
+3. MISSING — No document of the required type was uploaded at all, regardless of whether the tender requires it.
+
+IMPORTANT:
+- PENCOM Certificate: Check the uploaded documents. If a document with Type "PENCOM Certificate" is present but its expiry date has passed today (${today}), status MUST be EXPIRED. If absent, status MUST be MISSING.
+- NSITF Certificate: Same rule — if uploaded but expired, mark EXPIRED; if absent, mark MISSING.
+- Tax Clearance Certificate: Must cover the last 3 fiscal years and be valid as of today. If expired, mark EXPIRED.
+- CAC Certificate of Incorporation: Does not expire. If uploaded, mark MET.
+- Do NOT invent documents that are not in the uploaded list above.
+- Do NOT mark a document MET if its expiry status says EXPIRED.
+
+Calculate a compliance score from 0–100:
+- Start at 100
+- Deduct 15 points for each MISSING critical document (Tax Clearance, PENCOM, NSITF, CAC, Audited Financials)
+- Deduct 10 points for each EXPIRED document
+- Deduct 5 points for each MISSING non-critical document
+
+Respond with ONLY a valid JSON object — no markdown, no code fences, no explanation:
+{
+  "score": <integer 0-100>,
+  "summary": "<one concise sentence overall assessment referencing the company name>",
+  "requirements": [
+    {
+      "name": "<requirement name>",
+      "status": "<MET|MISSING|EXPIRED>",
+      "notes": "<specific explanation referencing the actual document name or absence>"
+    }
+  ],
+  "feedback": "<4-5 sentences of concrete, actionable procurement advice specific to the gaps identified above>"
+}`;
+
+    await delay(4000);
+
+    const result = await model.generateContent(prompt);
+    const raw = result.response.text().trim();
+
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error("Gemini did not return a valid JSON object. Raw response: " + truncate(raw, 300));
+    }
+
+    const analysisResult = JSON.parse(jsonMatch[0]);
+    res.json({ success: true, result: analysisResult });
+  } catch (err) {
+    console.error("Analysis error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Analysis failed. Please try again." });
+  }
 });
 
 app.listen(PORT, "localhost", () => {
