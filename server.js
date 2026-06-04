@@ -63,7 +63,7 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1" } });
 
     const today = new Date().toISOString().split("T")[0];
     const docList = buildDocumentList(documents);
@@ -125,7 +125,7 @@ Respond with ONLY a valid JSON object — no markdown, no code fences, no extra 
     await delay(4000);
 
     const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.5-flash-lite",
       contents: prompt,
     });
 
