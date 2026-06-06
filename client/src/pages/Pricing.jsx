@@ -58,7 +58,6 @@ const PLANS = [
 export default function Pricing() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(null);
-  const [paystackLoaded, setPaystackLoaded] = useState(false);
 
   const profile = (() => {
     try {
@@ -68,20 +67,7 @@ export default function Pricing() {
     }
   })();
 
-  useEffect(() => {
-    if (window.PaystackPop) {
-      setPaystackLoaded(true);
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = "https://js.paystack.co/v1/inline.js";
-    script.async = true;
-    script.onload = () => setPaystackLoaded(true);
-    document.head.appendChild(script);
-    return () => {
-      if (document.head.contains(script)) document.head.removeChild(script);
-    };
-  }, []);
+  const paystackLoaded = typeof window !== "undefined" && typeof window.PaystackPop === "function";
 
   async function handlePay(plan) {
     if (!paystackLoaded) return;
