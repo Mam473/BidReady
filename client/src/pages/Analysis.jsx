@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BarChart3, CheckCircle2, XCircle, AlertTriangle, Download,
-  RefreshCw, ArrowLeft, Sparkles, FileText, Building2, Clock,
+  Sparkles, FileText, Building2, Clock, Lock,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -29,17 +29,13 @@ function ScoreGauge({ score }) {
       <svg height={radius * 2} width={radius * 2} className="transform -rotate-180">
         <circle
           className="gauge-track"
-          cx={radius}
-          cy={radius}
-          r={normalizedRadius}
+          cx={radius} cy={radius} r={normalizedRadius}
           strokeDasharray={`${circumference} ${circumference}`}
           strokeDashoffset={circumference / 2}
         />
         <circle
           className="gauge-fill"
-          cx={radius}
-          cy={radius}
-          r={normalizedRadius}
+          cx={radius} cy={radius} r={normalizedRadius}
           stroke={color}
           strokeDasharray={`${circumference} ${circumference}`}
           strokeDashoffset={animated ? circumference / 2 + strokeDashoffset / 2 : circumference}
@@ -57,9 +53,9 @@ function ScoreGauge({ score }) {
 
 function RequirementRow({ req, index }) {
   const statusConfig = {
-    MET:     { icon: CheckCircle2, cls: "badge-met",     iconCls: "text-success-500" },
-    MISSING: { icon: XCircle,      cls: "badge-missing", iconCls: "text-danger-500"  },
-    EXPIRED: { icon: AlertTriangle,cls: "badge-expired", iconCls: "text-warning-600" },
+    MET:     { icon: CheckCircle2,  cls: "badge-met",     iconCls: "text-success-500" },
+    MISSING: { icon: XCircle,       cls: "badge-missing", iconCls: "text-danger-500"  },
+    EXPIRED: { icon: AlertTriangle, cls: "badge-expired", iconCls: "text-warning-600" },
   };
   const { icon: Icon, cls, iconCls } = statusConfig[req.status] || statusConfig.MISSING;
 
@@ -79,12 +75,16 @@ function RequirementRow({ req, index }) {
 
 export default function Analysis() {
   const navigate = useNavigate();
-  const [result, setResult] = useState(null);
+  const [result, setResult]   = useState(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [tender, setTender] = useState(null);
+  const [error, setError]     = useState(null);
+  const [tender, setTender]   = useState(null);
   const [profile, setProfile] = useState(null);
-  const [docs, setDocs] = useState([]);
+  const [docs, setDocs]       = useState([]);
+
+  const [isPaid, setIsPaid] = useState(
+    () => !!localStorage.getItem("bidready_payment_verified")
+  );
 
   useEffect(() => {
     const p = localStorage.getItem("bidready_profile");
@@ -95,15 +95,7 @@ export default function Analysis() {
     if (d) setDocs(JSON.parse(d));
   }, []);
 
-  async function runAnalysis() {
-    if (!tender) {
-      setError("No tender selected. Go to Tenders and click Analyse.");
-      return;
-    }
-    if (!profile) {
-      setError("No company profile found. Please complete onboarding.");
-      return;
-    }
+  async function doAnalysis() {
     setLoading(true);
     setError(null);
     setResult(null);
@@ -130,6 +122,78 @@ export default function Analysis() {
     } catch (err) {
       setError(err.message);
     } finally {
+      setLoading(false);
+    }
+  }
+
+  async function runAnalysis() {
+    if (!tender) {
+      setError("No tender selected. Go to Tenders and click Analyse.");
+      return;
+    }
+    if (!profile) {
+      setError("No company profile found. Please complete onboarding.");
+      return;
+    }
+
+    if (isPaid) {
+      doAnalysis();
+      return;
+    }
+
+    if (typeof window.PaystackPop !== "function") {
+      setError("Payment system not loaded. Please refresh the page and try again.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const email = profile.email ||
+        `${(profile.rcNumber || "user").toLowerCase().replace(/\s+/g, "")}@bidready.app`;
+
+      const initRes = await fetch("/api/payment/initialize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          planId: "single",
+          planName: "Single Tender Audit",
+          amount: 500000,
+          userId: profile.rcNumber || "anonymous",
+          email,
+        }),
+      });
+
+      const initData = await initRes.json();
+      if (!initRes.ok || !initData.reference) {
+        throw new Error(initData.error || "Could not initialise payment. Please try again.");
+      }
+
+      setLoading(false);
+
+      const popup = new window.PaystackPop();
+      popup.newTransaction({
+        key: initData.publicKey,
+        email: initData.email,
+        amount: 500000,
+        ref: initData.reference,
+        currency: "NGN",
+        metadata: {
+          plan_name: "Single Tender Audit",
+          user_id: profile.rcNumber || "anonymous",
+          company_name: profile.name || "",
+        },
+        onSuccess(transaction) {
+          localStorage.setItem("bidready_payment_verified", "true");
+          localStorage.setItem("bidready_payment_ref", transaction.reference);
+          setIsPaid(true);
+          doAnalysis();
+        },
+        onCancel() {},
+      });
+    } catch (err) {
+      setError(err.message);
       setLoading(false);
     }
   }
@@ -198,9 +262,7 @@ export default function Analysis() {
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
-    const summary = result.summary || "";
-    doc.text(doc.splitTextToSize(summary, pageW - margin * 2 - 60), margin + 55, y + 8);
-
+    doc.text(doc.splitTextToSize(result.summary || "", pageW - margin * 2 - 60), margin + 55, y + 8);
     y += 30;
 
     doc.setFontSize(12);
@@ -224,19 +286,15 @@ export default function Analysis() {
         if (data.column.index === 1 && data.section === "body") {
           const v = data.cell.raw;
           data.cell.styles.textColor =
-            v === "MET"     ? [22,163,74]  :
-            v === "EXPIRED" ? [217,119,6]  : [220,38,38];
+            v === "MET"     ? [22, 163, 74]  :
+            v === "EXPIRED" ? [217, 119, 6]  : [220, 38, 38];
         }
       },
       margin: { left: margin, right: margin },
     });
 
     y = doc.lastAutoTable.finalY + 12;
-
-    if (y > doc.internal.pageSize.getHeight() - 60) {
-      doc.addPage();
-      y = 20;
-    }
+    if (y > doc.internal.pageSize.getHeight() - 60) { doc.addPage(); y = 20; }
 
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
@@ -258,7 +316,10 @@ export default function Analysis() {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
-      doc.text(`BidReady Compliance Report — Page ${i} of ${pageCount}`, pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: "center" });
+      doc.text(
+        `BidReady Compliance Report — Page ${i} of ${pageCount}`,
+        pageW / 2, doc.internal.pageSize.getHeight() - 10, { align: "center" }
+      );
     }
 
     doc.save(`BidReady_Compliance_${profile.name.replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.pdf`);
@@ -293,7 +354,12 @@ export default function Analysis() {
             {loading ? (
               <>
                 <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                Analysing…
+                {isPaid ? "Analysing…" : "Initialising payment…"}
+              </>
+            ) : !isPaid ? (
+              <>
+                <Lock className="w-4 h-4" />
+                ₦5,000 — Analyse Tender
               </>
             ) : (
               <>
@@ -304,6 +370,21 @@ export default function Analysis() {
           </button>
         </div>
       </div>
+
+      {/* Payment gate banner — shown only when unpaid and tender is selected */}
+      {!isPaid && tender && (
+        <div className="card p-4 flex items-center gap-4 bg-amber-50 border-amber-200">
+          <div className="w-9 h-9 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center shrink-0">
+            <Lock className="w-4 h-4 text-amber-700" />
+          </div>
+          <div className="flex-1">
+            <p className="font-semibold text-amber-900 text-sm">One-time payment required</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              A secure ₦5,000 Paystack payment unlocks this analysis. Your card details never touch our servers.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Context cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -358,7 +439,7 @@ export default function Analysis() {
         <div className="card p-4 bg-danger-50 border-danger-200 flex items-start gap-3">
           <XCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold text-danger-700 text-sm">Analysis Failed</p>
+            <p className="font-semibold text-danger-700 text-sm">Error</p>
             <p className="text-xs text-danger-600 mt-0.5">{error}</p>
           </div>
         </div>
@@ -368,8 +449,12 @@ export default function Analysis() {
       {loading && (
         <div className="card p-12 text-center">
           <div className="w-16 h-16 rounded-full border-4 border-brand-100 border-t-brand-500 animate-spin mx-auto mb-4" />
-          <p className="font-semibold text-slate-700">Analysing compliance…</p>
-          <p className="text-sm text-slate-400 mt-1">Gemini AI is reviewing your tender requirements</p>
+          <p className="font-semibold text-slate-700">
+            {isPaid ? "Analysing compliance…" : "Confirming payment…"}
+          </p>
+          <p className="text-sm text-slate-400 mt-1">
+            {isPaid ? "Gemini AI is reviewing your tender requirements" : "Please complete the Paystack checkout"}
+          </p>
         </div>
       )}
 
