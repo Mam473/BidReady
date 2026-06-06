@@ -8,14 +8,36 @@ import {
   Menu,
   X,
   Shield,
-  ChevronRight,
+  CreditCard,
+  LayoutDashboard,
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { to: "/documents", icon: FolderOpen, label: "Documents" },
-  { to: "/tenders",   icon: FileText,   label: "Tenders"   },
-  { to: "/analysis",  icon: BarChart3,  label: "Analysis"  },
+  { to: "/documents", icon: FolderOpen,      label: "Documents" },
+  { to: "/tenders",   icon: FileText,         label: "Tenders"   },
+  { to: "/analysis",  icon: BarChart3,        label: "Analysis"  },
+  { to: "/pricing",   icon: CreditCard,       label: "Pricing"   },
+  { to: "/admin",     icon: LayoutDashboard,  label: "Admin"     },
 ];
+
+function NavItem({ to, icon: Icon, label, onClick }) {
+  return (
+    <NavLink
+      to={to}
+      onClick={onClick}
+      className={({ isActive }) =>
+        `flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
+          isActive
+            ? "bg-brand-500 text-white shadow-md"
+            : "text-brand-200 hover:bg-white/10 hover:text-white"
+        }`
+      }
+    >
+      <Icon className="w-4 h-4 shrink-0" />
+      {label}
+    </NavLink>
+  );
+}
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -53,21 +75,8 @@ export default function Layout() {
 
         {/* Nav */}
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
-                  isActive
-                    ? "bg-brand-500 text-white shadow-md"
-                    : "text-brand-200 hover:bg-white/10 hover:text-white"
-                }`
-              }
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              {label}
-            </NavLink>
+          {NAV_ITEMS.map(({ to, icon, label }) => (
+            <NavItem key={to} to={to} icon={icon} label={label} />
           ))}
         </nav>
 
@@ -115,20 +124,8 @@ export default function Layout() {
               <p className="text-xs text-brand-300 truncate mt-0.5">RC: {profile.rcNumber || "—"}</p>
             </div>
             <nav className="flex-1 px-3 space-y-1">
-              {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  onClick={() => setMobileOpen(false)}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                      isActive ? "bg-brand-500 text-white" : "text-brand-200 hover:bg-white/10 hover:text-white"
-                    }`
-                  }
-                >
-                  <Icon className="w-4 h-4" />
-                  {label}
-                </NavLink>
+              {NAV_ITEMS.map(({ to, icon, label }) => (
+                <NavItem key={to} to={to} icon={icon} label={label} onClick={() => setMobileOpen(false)} />
               ))}
             </nav>
             <div className="px-4 py-4 border-t border-white/10">
