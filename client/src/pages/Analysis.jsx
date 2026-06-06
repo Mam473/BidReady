@@ -85,6 +85,7 @@ export default function Analysis() {
   const [isPaid, setIsPaid] = useState(
     () => !!localStorage.getItem("bidready_payment_verified")
   );
+  const [paystackReady, setPaystackReady] = useState(false);
 
   useEffect(() => {
     const p = localStorage.getItem("bidready_profile");
@@ -93,6 +94,22 @@ export default function Analysis() {
     if (p) setProfile(JSON.parse(p));
     if (t) setTender(JSON.parse(t));
     if (d) setDocs(JSON.parse(d));
+  }, []);
+
+  useEffect(() => {
+    if (typeof window.PaystackPop === "function") {
+      setPaystackReady(true);
+      return;
+    }
+    let script = document.querySelector('script[src*="js.paystack.co"]');
+    if (!script) {
+      script = document.createElement("script");
+      script.src = "https://js.paystack.co/v1/inline.js";
+      document.head.appendChild(script);
+    }
+    function onLoad() { setPaystackReady(true); }
+    script.addEventListener("load", onLoad);
+    return () => script.removeEventListener("load", onLoad);
   }, []);
 
   async function doAnalysis() {
@@ -141,8 +158,8 @@ export default function Analysis() {
       return;
     }
 
-    if (typeof window.PaystackPop !== "function") {
-      setError("Payment system not loaded. Please refresh the page and try again.");
+    if (!paystackReady) {
+      setError("Payment system is still loading. Please wait a moment and try again.");
       return;
     }
 
