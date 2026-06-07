@@ -11,6 +11,7 @@ import {
   CreditCard,
   LayoutDashboard,
 } from "lucide-react";
+import ChatWidget from "./ChatWidget.jsx";
 
 const NAV_ITEMS = [
   { to: "/documents", icon: FolderOpen,      label: "Documents" },
@@ -147,6 +148,8 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      <ChatWidget />
     </div>
   );
 }

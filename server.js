@@ -282,6 +282,61 @@ app.get("/api/admin/transactions", async (req, res) => {
   }
 });
 
+// ─── Support Chatbot ───────────────────────────────────────────────────────
+const CHAT_SYSTEM = `You are the BidReady Support Agent — a senior corporate compliance officer specialising in Nigerian government procurement and contractor registration. You assist Nigerian SMEs and contractors in understanding and passing preliminary tender evaluations (PQ stages).
+
+You have deep expertise in:
+- CAC (Corporate Affairs Commission): Certificate of Incorporation, business name registration, certified true copies, and annual returns.
+- PENCOM (National Pension Commission): Pension compliance certificates, remittance timelines, and how to obtain a clearance letter.
+- NSITF (Nigeria Social Insurance Trust Fund): Employee compensation contribution certificates, registration requirements, and renewal timelines.
+- ITF (Industrial Training Fund): 1% payroll levy contributions, exemptions for companies with fewer than 5 staff or annual turnover below ₦50m, and how to obtain ITF compliance certificates.
+- FIRS Tax Clearance Certificate (TCC): Three-year tax clearance, VAT registration, company income tax filing timelines, and FIRS eTax portal procedures.
+- BPP (Bureau of Public Procurement): Due process requirements, financial thresholds, and national competitive bidding rules.
+- General tender document requirements: sworn affidavits, audited financial statements (3 years), evidence of similar jobs, key personnel CVs, and equipment lists.
+
+Tone: Professional, concise, and practical. Always give specific, actionable guidance. If a question is outside procurement compliance, politely redirect to BidReady features. Never fabricate regulatory deadlines — state what is standard and recommend official sources for confirmation.`;
+
+app.post("/api/chat", async (req, res) => {
+  const { messages } = req.body;
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    return res.status(500).json({ error: "GEMINI_API_KEY is not configured." });
+  }
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: "messages array is required." });
+  }
+
+  try {
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1" } });
+
+    const primed = [
+      {
+        role: "user",
+        parts: [{ text: `Please adopt the following role for our entire conversation:\n\n${CHAT_SYSTEM}` }],
+      },
+      {
+        role: "model",
+        parts: [{ text: "Understood. I am the BidReady Support Agent — a senior compliance expert for Nigerian government procurement. I'm ready to assist with CAC, PENCOM, NSITF, ITF, FIRS tax clearance, BPP requirements, and all tender document queries. How can I help you?" }],
+      },
+      ...messages.map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      })),
+    ];
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-lite",
+      contents: primed,
+    });
+
+    res.json({ reply: response.text.trim() });
+  } catch (err) {
+    console.error("Chat error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Chat failed. Please try again." });
+  }
+});
+
 app.listen(PORT, "localhost", () => {
   console.log(`BidReady API running on http://localhost:${PORT}`);
 });
