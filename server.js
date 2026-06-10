@@ -65,31 +65,45 @@ const FAST_PATH_MATCHERS = [
   },
 ];
 
-// Quick scan: parse only the first 3 pages, return up to 600 chars
-async function quickScanPDF(buffer) {
+// ── FULL PDF EXTRACTOR ─────────────────────────────────────────────────────
+// Reads EVERY page with no page-count limit. Awaits parse completion in full
+// before returning so no trailing pages are dropped from the text string.
+async function extractFullText(buffer) {
   try {
-    const data = await pdfParse(buffer, { max: 3 });
-    return data.text.replace(/\s+/g, " ").trim().slice(0, 600);
-  } catch {
+    const data = await pdfParse(buffer); // no max — all pages, fully awaited
+    return data.text.replace(/\s+/g, " ").trim();
+  } catch (err) {
+    console.warn("PDF parse warning:", err?.message);
     return "";
   }
 }
 
-// Regulatory extract: first 5 pages, up to 2,000 chars for date detection
-async function extractRegulatoryCert(buffer) {
-  try {
-    const data = await pdfParse(buffer, { max: 5 });
-    return data.text.replace(/\s+/g, " ").trim().slice(0, 2000);
-  } catch {
-    return "";
+// ── OVERLAPPING SLIDING WINDOW CHUNKER ────────────────────────────────────
+// Splits `text` into windows of `windowSize` chars, stepping by
+// (windowSize - overlap) chars per window. The 1,000-char overlap guarantees
+// that any header or expiration date that straddles a page boundary appears
+// intact in at least one complete chunk and is never sliced in half.
+function buildChunks(text, windowSize = 4000, overlap = 1000) {
+  if (!text) return [];
+  const chunks = [];
+  const step = windowSize - overlap;
+  for (let i = 0; i < text.length; i += step) {
+    chunks.push(text.slice(i, i + windowSize));
+    if (i + windowSize >= text.length) break;
   }
+  return chunks;
 }
 
-// Try to fast-path classify a file by filename + quick-scan text
-function fastPathMatch(filename, scanText) {
-  const haystack = `${filename} ${scanText}`;
+// ── FAST-PATH MATCH — scans every overlapping chunk of the full PDF text ──
+// Checks the filename first (fast), then walks every chunk so no keyword
+// match is missed because it happened to straddle a page boundary.
+function fastPathMatch(filename, fullText) {
+  const chunks = buildChunks(fullText);
   for (const { category, patterns } of FAST_PATH_MATCHERS) {
-    if (patterns.some((rx) => rx.test(haystack))) {
+    if (
+      patterns.some((rx) => rx.test(filename)) ||
+      chunks.some((chunk) => patterns.some((rx) => rx.test(chunk)))
+    ) {
       return category;
     }
   }
@@ -158,11 +172,13 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
   }
 
   try {
-    // ── STAGE 1: Parallel quick scan — first 3 pages, 200 chars/page ─────
+    // ── STAGE 1: Full parallel extraction — ALL pages, fully awaited ──────
+    // extractFullText has no page limit. Promise.all waits for every file
+    // to finish parsing before any result is used downstream.
     const scanned = await Promise.all(
       files.map(async (file) => {
-        const scanText = await quickScanPDF(file.buffer);
-        return { file, scanText };
+        const fullText = await extractFullText(file.buffer);
+        return { file, fullText };
       })
     );
 
@@ -172,39 +188,39 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
       ELEVEN_CATEGORIES.map((cat) => [cat, { name: cat, status: "MISSING", notes: "No matching document uploaded." }])
     );
 
-    // Files that matched a fast-path category are resolved immediately
-    const fastPathSet = new Set(FAST_PATH_MATCHERS.map((m) => m.category));
+    // fastPathMatch scans every overlapping chunk of the full extracted text
     const regulatoryFiles = [];
 
-    for (const { file, scanText } of scanned) {
-      const matched = fastPathMatch(file.originalname, scanText);
+    for (const { file, fullText } of scanned) {
+      const matched = fastPathMatch(file.originalname, fullText);
       if (matched) {
-        // Mark MET immediately — no date extraction, no AI
+        // Rule 1: static/capability category — lock to MET immediately
         responseBuffer[matched] = {
           name: matched,
           status: "MET",
           notes: `Matched from uploaded file: ${file.originalname}`,
         };
       } else {
-        // Queue for regulatory cert extraction + AI classification
-        regulatoryFiles.push({ file, scanText });
+        // Queue for AI classification — carry the full extracted text forward
+        // so Stage 3 needs zero additional PDF parses
+        regulatoryFiles.push({ filename: file.originalname, fullText });
       }
     }
 
     // ── STAGE 3: AI classification — only unresolved regulatory cert files ─
-    // How many fast-path categories still need resolution via AI
     const unresolvedFastPath = FAST_PATH_MATCHERS
       .filter(({ category }) => responseBuffer[category].status === "MISSING")
       .map(({ category }) => category);
 
     if (regulatoryFiles.length > 0 || unresolvedFastPath.length > 0) {
-      // Extract regulatory cert text in parallel (first 5 pages, 2,000 chars)
-      const regExtracted = await Promise.all(
-        regulatoryFiles.map(async ({ file }) => {
-          const text = await extractRegulatoryCert(file.buffer);
-          return { filename: file.originalname, text };
-        })
-      );
+      // Build doc block from pre-extracted text — no second PDF parse needed.
+      // Each document is capped at 10,000 chars so the AI prompt stays within
+      // a practical context limit while still covering multi-page bundles.
+      const MAX_DOC_CHARS = 10000;
+      const regExtracted = regulatoryFiles.map(({ filename, fullText }) => ({
+        filename,
+        text: fullText.length > MAX_DOC_CHARS ? fullText.slice(0, MAX_DOC_CHARS) : fullText,
+      }));
 
       // Only include unresolved categories in the AI prompt
       const unresolvedCategories = ELEVEN_CATEGORIES.filter(
@@ -235,12 +251,15 @@ STATIC/CAPABILITY (no expiry check — status is FOUND or MISSING):
 - CAC Registration Documents, Sworn Affidavit, Evidence of Financial Capability, Evidence of Similar Jobs, Company Profile with CVs
 → If a matching document is present: status = "FOUND". If absent: status = "MISSING".
 
-REGULATORY CERTIFICATES (expiry extraction required):
+REGULATORY CERTIFICATES (strict expiry extraction — Rule 2):
 - Tax Clearance (FIRS), PENCOM, NSITF, ITF, BPP, Audited Financial Accounts
-→ Search the document text for any expiry or validity date (e.g. "valid until", "expires", "valid through", year patterns).
-→ If a date is found: set status = "FOUND" and expiryDate = "<YYYY-MM-DD>".
-→ If no date found but the document text is present: set status = "FOUND" and omit expiryDate.
-→ If no document uploaded for this category: status = "MISSING", omit expiryDate.
+→ Search the ENTIRE document text for any expiry or validity date phrase:
+  "valid until", "expiry date", "expires", "valid through", "valid to", "date of expiry",
+  or any date pattern (DD/MM/YYYY, YYYY-MM-DD, "31 December 2025", etc.).
+→ If a clearly future date (on or after ${BASELINE_STR}) is found: status = "FOUND", expiryDate = "<YYYY-MM-DD>".
+→ If a date is found but it is BEFORE ${BASELINE_STR}: status = "FOUND", expiryDate = "<YYYY-MM-DD>" (server will mark EXPIRED).
+→ STRICT RULE: If the document name/header is present in the text but NO valid date can be extracted: status = "FOUND", omit expiryDate (server will mark EXPIRED — do NOT assume MET).
+→ If no document at all was uploaded for this category: status = "MISSING", omit expiryDate.
 
 Respond ONLY with valid JSON — no markdown, no extra text:
 {
