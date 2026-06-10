@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import crypto from "crypto";
 import pg from "pg";
+import multer from "multer";
+import pdfParse from "pdf-parse";
 import { GoogleGenAI } from "@google/genai";
 
 const { Pool } = pg;
@@ -12,6 +14,7 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -20,36 +23,59 @@ function truncate(text, maxChars) {
   return text.length > maxChars ? text.slice(0, maxChars) + "…" : text;
 }
 
-function buildDocumentList(documents) {
-  if (!documents || documents.length === 0)
-    return "NONE — no compliance documents have been uploaded.";
+// ─── 11 Required Document Categories ──────────────────────────────────────
+const ELEVEN_CATEGORIES = [
+  "CAC Registration Documents",
+  "Sworn Affidavit of Due Process",
+  "Evidence of Financial Capability",
+  "Evidence of 3 Similar Jobs",
+  "Company Profile with CVs",
+  "Tax Clearance Certificate (FIRS)",
+  "PENCOM Compliance Certificate",
+  "NSITF Certificate",
+  "ITF Compliance Certificate",
+  "BPP Federal Contractor Certificate",
+  "Audited Financial Accounts Statement",
+];
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+// Categories that are permanently MET when found — no expiry check
+const ALWAYS_MET_CATEGORIES = [
+  "CAC Registration Documents",
+  "Sworn Affidavit of Due Process",
+  "Evidence of Financial Capability",
+  "Evidence of 3 Similar Jobs",
+  "Company Profile with CVs",
+];
 
-  return documents
-    .map((d) => {
-      let expiryStatus = "NO EXPIRY DATE SET";
+// Validation baseline date for expiry checks
+const BASELINE_DATE = new Date("2026-12-31");
+const BASELINE_STR  = "2026-12-31";
 
-      if (d.expiryDate) {
-        const expiry = new Date(d.expiryDate);
-        expiry.setHours(0, 0, 0, 0);
-        const diffDays = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+// ─── Server-side date math post-processing ─────────────────────────────────
+function applyDateMath(requirements) {
+  return requirements.map((req) => {
+    const isAlwaysMet = ALWAYS_MET_CATEGORIES.some((cat) =>
+      req.name.toLowerCase().includes(cat.toLowerCase().split(" ")[0]) ||
+      cat.toLowerCase().includes(req.name.toLowerCase().split(" ")[0])
+    );
 
-        if (diffDays < 0) {
-          expiryStatus = `EXPIRED (expired ${Math.abs(diffDays)} day${Math.abs(diffDays) === 1 ? "" : "s"} ago on ${d.expiryDate})`;
-        } else if (diffDays === 0) {
-          expiryStatus = `EXPIRED (expires today — ${d.expiryDate})`;
-        } else if (diffDays <= 30) {
-          expiryStatus = `EXPIRING SOON (${diffDays} day${diffDays === 1 ? "" : "s"} left — expires ${d.expiryDate})`;
-        } else {
-          expiryStatus = `VALID (expires ${d.expiryDate}, ${diffDays} days remaining)`;
+    if (isAlwaysMet && req.status !== "MISSING") {
+      return { ...req, status: "MET" };
+    }
+
+    if (!isAlwaysMet && req.status === "MET") {
+      const notes = req.notes || "";
+      const dateMatch = notes.match(/(\d{4}-\d{2}-\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{1,2}\s+\w+\s+\d{4})/);
+      if (dateMatch) {
+        const parsed = new Date(dateMatch[0]);
+        if (!isNaN(parsed) && parsed < BASELINE_DATE) {
+          return { ...req, status: "EXPIRED" };
         }
       }
+    }
 
-      return `  • Document Name: "${d.name}"\n    Type: ${d.type || "General/Unspecified"}\n    Expiry Status: ${expiryStatus}`;
-    })
-    .join("\n\n");
+    return req;
+  });
 }
 
 // ─── Health ────────────────────────────────────────────────────────────────
@@ -57,60 +83,93 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// ─── Gemini Analysis ───────────────────────────────────────────────────────
-app.post("/api/analyze", async (req, res) => {
-  const { companyProfile, documents, tenderText, tenderName } = req.body;
-
+// ─── Gemini Analysis (multipart file bundle) ──────────────────────────────
+app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: "GEMINI_API_KEY is not configured in Secrets." });
   }
-  if (!companyProfile || !tenderText) {
+
+  let companyProfile, tenderText, tenderName;
+  try {
+    companyProfile = JSON.parse(req.body.companyProfile || "{}");
+    tenderText     = req.body.tenderText || "";
+    tenderName     = req.body.tenderName || "Government Procurement Tender";
+  } catch {
+    return res.status(400).json({ error: "Invalid companyProfile JSON." });
+  }
+
+  if (!companyProfile.name || !tenderText) {
     return res.status(400).json({ error: "companyProfile and tenderText are required." });
   }
 
+  const files = req.files || [];
+  if (files.length === 0) {
+    return res.status(400).json({ error: "At least one PDF file is required." });
+  }
+
   try {
-    const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1" } });
+    // Extract text from each uploaded PDF (8,000-char window per file)
+    const extractedDocs = await Promise.all(
+      files.map(async (file) => {
+        try {
+          const data = await pdfParse(file.buffer);
+          const text = truncate(data.text.replace(/\s+/g, " ").trim(), 8000);
+          return { filename: file.originalname, text };
+        } catch {
+          return { filename: file.originalname, text: `[Could not extract text from ${file.originalname}]` };
+        }
+      })
+    );
 
-    const today = new Date().toISOString().split("T")[0];
-    const docList = buildDocumentList(documents);
-    const tenderBlock = truncate(tenderText, 2000);
+    const docBlock = extractedDocs
+      .map((d, i) => `--- Document ${i + 1}: ${d.filename} ---\n${d.text}`)
+      .join("\n\n");
 
-    const prompt = `You are a strict Nigerian government procurement compliance officer. Your job is to evaluate whether an SME meets the requirements of a specific tender based ONLY on the documents they have actually uploaded.
+    const tenderBlock = truncate(tenderText, 3000);
 
-TODAY'S DATE: ${today}
+    const prompt = `You are a strict Nigerian government procurement compliance AI. Your task is:
+1. Auto-classify each uploaded document into one of the 11 required categories below.
+2. Evaluate overall compliance of the company against the tender requirements.
 
-━━━ COMPANY PROFILE ━━━
+VALIDATION BASELINE DATE: ${BASELINE_STR}
+
+COMPANY PROFILE:
 Company Name : ${companyProfile.name}
-Industry     : ${companyProfile.industry}
-RC Number    : ${companyProfile.rcNumber}
+Industry     : ${companyProfile.industry || "N/A"}
+RC Number    : ${companyProfile.rcNumber || "N/A"}
 
-━━━ UPLOADED COMPLIANCE DOCUMENTS ━━━
-The following is the COMPLETE list of documents this company has uploaded. Each entry shows the document name, its declared type, and its calculated expiry status based on today's date (${today}). If a document shows "EXPIRED", treat it as non-compliant — do NOT assume it is valid.
+━━━ 11 REQUIRED DOCUMENT CATEGORIES ━━━
+${ELEVEN_CATEGORIES.map((c, i) => `${i + 1}. ${c}`).join("\n")}
 
-${docList}
+━━━ UPLOADED DOCUMENTS (auto-classify each) ━━━
+${docBlock}
 
 ━━━ TENDER REQUIREMENTS ━━━
-Tender: ${truncate(tenderName || "Government Procurement Tender", 100)}
-
+Tender: ${truncate(tenderName, 120)}
 ${tenderBlock}
 
-━━━ EVALUATION RULES ━━━
-Apply these rules strictly when setting each requirement's status:
+━━━ CLASSIFICATION & EVALUATION RULES ━━━
+For each of the 11 categories, determine whether it is MET, MISSING, or EXPIRED:
 
-1. MET — The company has uploaded a document of the correct type AND its expiry status is VALID or NO EXPIRY DATE SET.
-2. EXPIRED — The company uploaded a document of the correct type BUT its expiry status is EXPIRED or EXPIRING SOON.
-3. MISSING — No document of the required type was uploaded at all.
+PERMANENT MET CATEGORIES (mark MET if the document content matches — do NOT apply expiry logic):
+- CAC Registration Documents: any CAC certificate, certificate of incorporation, business name registration
+- Sworn Affidavit of Due Process: any sworn statement, affidavit, statutory declaration
+- Evidence of Financial Capability: bank statement, letter of credit, financial capacity proof
+- Evidence of 3 Similar Jobs: letters of award, completion certificates, contracts for similar projects
+- Company Profile with CVs: company profile document, staff CVs, personnel records
 
-IMPORTANT:
-- PENCOM Certificate: If uploaded but expired → EXPIRED. If absent → MISSING.
-- NSITF Certificate: Same rule — if uploaded but expired → EXPIRED; if absent → MISSING.
-- Tax Clearance Certificate: Must be valid as of today. If expired → EXPIRED.
-- CAC Certificate of Incorporation: Does not expire. If uploaded → MET.
-- Do NOT mark a document MET if its expiry status says EXPIRED.
-- Do NOT invent documents not in the uploaded list above.
+REGULATORY CERTIFICATES (apply expiry logic — baseline date is ${BASELINE_STR}):
+- Tax Clearance Certificate (FIRS): extract any expiry/validity date from the document text. If expiry date < ${BASELINE_STR} → EXPIRED. If valid → MET. If not found → MISSING.
+- PENCOM Compliance Certificate: same expiry rule.
+- NSITF Certificate: same expiry rule.
+- ITF Compliance Certificate: same expiry rule.
+- BPP Federal Contractor Certificate: same expiry rule.
+- Audited Financial Accounts Statement: check if accounts are for the last 3 years relative to ${BASELINE_STR}. If present → MET, else → MISSING.
 
-Scoring (start at 100):
+If a category has no matching uploaded document → MISSING.
+
+SCORING (start at 100):
 - Deduct 15 pts per MISSING critical doc (Tax Clearance, PENCOM, NSITF, CAC, Audited Financials)
 - Deduct 10 pts per EXPIRED document
 - Deduct 5 pts per MISSING non-critical document
@@ -118,32 +177,40 @@ Scoring (start at 100):
 Respond with ONLY a valid JSON object — no markdown, no code fences, no extra text:
 {
   "score": <integer 0-100>,
-  "summary": "<one concise sentence overall assessment referencing the company name>",
+  "summary": "<one concise sentence referencing the company name and overall compliance posture>",
   "requirements": [
     {
-      "name": "<requirement name>",
+      "name": "<one of the 11 category names exactly>",
       "status": "<MET|MISSING|EXPIRED>",
-      "notes": "<specific explanation referencing the actual document name or absence>"
+      "notes": "<specific explanation — reference the matched filename, extracted expiry date if applicable, or reason for MISSING>"
     }
   ],
-  "feedback": "<4-5 sentences of concrete, actionable procurement advice specific to the gaps identified>"
-}`;
+  "feedback": "<4-5 sentences of concrete, actionable procurement advice specific to the gaps found>"
+}
 
-    await delay(4000);
+The "requirements" array MUST contain exactly 11 entries, one per category, in the same order listed above.`;
 
+    await delay(3000);
+
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1" } });
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-lite",
       contents: prompt,
     });
 
     const raw = response.text.trim();
-
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      throw new Error("Gemini did not return a valid JSON object. Raw: " + truncate(raw, 300));
+      throw new Error("Gemini did not return valid JSON. Raw: " + truncate(raw, 300));
     }
 
     const analysisResult = JSON.parse(jsonMatch[0]);
+
+    // Enforce server-side date math rules
+    if (Array.isArray(analysisResult.requirements)) {
+      analysisResult.requirements = applyDateMath(analysisResult.requirements);
+    }
+
     res.json({ success: true, result: analysisResult });
   } catch (err) {
     console.error("Analysis error:", err?.message || err);
@@ -231,9 +298,7 @@ app.post("/api/payment/webhook", express.raw({ type: "application/json" }), asyn
     const { reference, amount, customer } = event.data;
     try {
       await db.query(
-        `UPDATE payments
-         SET payment_status = 'success'
-         WHERE payment_reference = $1`,
+        `UPDATE payments SET payment_status = 'success' WHERE payment_reference = $1`,
         [reference]
       );
       console.log(`Payment confirmed: ${reference} — ₦${amount / 100} from ${customer?.email}`);
@@ -271,9 +336,7 @@ app.get("/api/admin/transactions", async (req, res) => {
   try {
     const result = await db.query(
       `SELECT id, user_id, plan_name, amount, payment_reference, payment_status, created_at
-       FROM payments
-       ORDER BY created_at DESC
-       LIMIT 50`
+       FROM payments ORDER BY created_at DESC LIMIT 50`
     );
     res.json({ transactions: result.rows });
   } catch (err) {

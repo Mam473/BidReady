@@ -3,8 +3,7 @@ import { MessageCircle, X, Send, Bot, User, Loader2 } from "lucide-react";
 
 const WELCOME = {
   role: "assistant",
-  content:
-    "Hello! I'm your BidReady Support Agent — a compliance expert for Nigerian contractors. Ask me about CAC registration, PENCOM, NSITF, ITF, Tax Clearance Certificates, or any tender document requirement.",
+  content: "Message from BidReady Support: Hi, how can we be of help today",
 };
 
 function Message({ msg }) {
@@ -36,12 +35,12 @@ function Message({ msg }) {
 }
 
 export default function ChatWidget() {
-  const [open, setOpen]       = useState(false);
+  const [open, setOpen]         = useState(false);
   const [messages, setMessages] = useState([WELCOME]);
-  const [input, setInput]     = useState("");
-  const [loading, setLoading] = useState(false);
-  const bottomRef             = useRef(null);
-  const inputRef              = useRef(null);
+  const [input, setInput]       = useState("");
+  const [loading, setLoading]   = useState(false);
+  const bottomRef               = useRef(null);
+  const inputRef                = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

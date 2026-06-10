@@ -1,11 +1,25 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BarChart3, CheckCircle2, XCircle, AlertTriangle, Download,
-  Sparkles, FileText, Building2, Clock, Lock,
+  Sparkles, FileText, Building2, Clock, Upload, X, FolderOpen,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+
+const ELEVEN_CATEGORIES = [
+  "CAC Registration Documents",
+  "Sworn Affidavit of Due Process",
+  "Evidence of Financial Capability",
+  "Evidence of 3 Similar Jobs",
+  "Company Profile with CVs",
+  "Tax Clearance Certificate (FIRS)",
+  "PENCOM Compliance Certificate",
+  "NSITF Certificate",
+  "ITF Compliance Certificate",
+  "BPP Federal Contractor Certificate",
+  "Audited Financial Accounts Statement",
+];
 
 function ScoreGauge({ score }) {
   const radius = 80;
@@ -75,57 +89,74 @@ function RequirementRow({ req, index }) {
 
 export default function Analysis() {
   const navigate = useNavigate();
-  const [result, setResult]   = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState(null);
-  const [tender, setTender]   = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [docs, setDocs]       = useState([]);
-
-  const [isPaid, setIsPaid] = useState(
-    () => !!localStorage.getItem("bidready_payment_verified")
-  );
-  const [paystackReady, setPaystackReady] = useState(false);
+  const [result, setResult]         = useState(null);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState(null);
+  const [tender, setTender]         = useState(null);
+  const [profile, setProfile]       = useState(null);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [dragOver, setDragOver]     = useState(false);
+  const fileRef                     = useRef();
 
   useEffect(() => {
     const p = localStorage.getItem("bidready_profile");
     const t = localStorage.getItem("bidready_active_tender");
-    const d = localStorage.getItem("bidready_documents");
     if (p) setProfile(JSON.parse(p));
     if (t) setTender(JSON.parse(t));
-    if (d) setDocs(JSON.parse(d));
   }, []);
 
-  useEffect(() => {
-    if (typeof window.PaystackPop === "function") {
-      setPaystackReady(true);
+  function addFiles(newFiles) {
+    const pdfs = Array.from(newFiles).filter((f) => f.type === "application/pdf");
+    if (pdfs.length === 0) {
+      setError("Only PDF files are accepted. Please upload PDF documents.");
       return;
     }
-    let script = document.querySelector('script[src*="js.paystack.co"]');
-    if (!script) {
-      script = document.createElement("script");
-      script.src = "https://js.paystack.co/v1/inline.js";
-      document.head.appendChild(script);
-    }
-    function onLoad() { setPaystackReady(true); }
-    script.addEventListener("load", onLoad);
-    return () => script.removeEventListener("load", onLoad);
-  }, []);
+    setError(null);
+    setUploadedFiles((prev) => {
+      const existing = new Set(prev.map((f) => f.name));
+      const unique = pdfs.filter((f) => !existing.has(f.name));
+      return [...prev, ...unique];
+    });
+  }
 
-  async function doAnalysis() {
+  function removeFile(name) {
+    setUploadedFiles((prev) => prev.filter((f) => f.name !== name));
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    addFiles(e.dataTransfer.files);
+  }
+
+  async function runAnalysis() {
+    if (!tender) {
+      setError("No tender selected. Go to Tenders and click Analyse.");
+      return;
+    }
+    if (!profile) {
+      setError("No company profile found. Please complete onboarding.");
+      return;
+    }
+    if (uploadedFiles.length === 0) {
+      setError("Please upload at least one PDF document before running analysis.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setResult(null);
+
     try {
+      const formData = new FormData();
+      formData.append("companyProfile", JSON.stringify(profile));
+      formData.append("tenderText", tender.content);
+      formData.append("tenderName", tender.name);
+      uploadedFiles.forEach((f) => formData.append("files", f));
+
       const res = await fetch("/api/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          companyProfile: profile,
-          documents: docs,
-          tenderText: tender.content,
-          tenderName: tender.name,
-        }),
+        body: formData,
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || "Analysis failed");
@@ -139,78 +170,6 @@ export default function Analysis() {
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
-    }
-  }
-
-  async function runAnalysis() {
-    if (!tender) {
-      setError("No tender selected. Go to Tenders and click Analyse.");
-      return;
-    }
-    if (!profile) {
-      setError("No company profile found. Please complete onboarding.");
-      return;
-    }
-
-    if (isPaid) {
-      doAnalysis();
-      return;
-    }
-
-    if (!paystackReady) {
-      setError("Payment system is still loading. Please wait a moment and try again.");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const email = profile.email ||
-        `${(profile.rcNumber || "user").toLowerCase().replace(/\s+/g, "")}@bidready.app`;
-
-      const initRes = await fetch("/api/payment/initialize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          planId: "single",
-          planName: "Single Tender Audit",
-          amount: 500000,
-          userId: profile.rcNumber || "anonymous",
-          email,
-        }),
-      });
-
-      const initData = await initRes.json();
-      if (!initRes.ok || !initData.reference) {
-        throw new Error(initData.error || "Could not initialise payment. Please try again.");
-      }
-
-      setLoading(false);
-
-      const popup = new window.PaystackPop();
-      popup.newTransaction({
-        key: initData.publicKey,
-        email: initData.email,
-        amount: 500000,
-        ref: initData.reference,
-        currency: "NGN",
-        metadata: {
-          plan_name: "Single Tender Audit",
-          user_id: profile.rcNumber || "anonymous",
-          company_name: profile.name || "",
-        },
-        onSuccess(transaction) {
-          localStorage.setItem("bidready_payment_verified", "true");
-          localStorage.setItem("bidready_payment_ref", transaction.reference);
-          setIsPaid(true);
-          doAnalysis();
-        },
-        onCancel() {},
-      });
-    } catch (err) {
-      setError(err.message);
       setLoading(false);
     }
   }
@@ -365,18 +324,13 @@ export default function Analysis() {
           )}
           <button
             onClick={runAnalysis}
-            disabled={loading || !tender}
+            disabled={loading || !tender || uploadedFiles.length === 0}
             className="btn-primary"
           >
             {loading ? (
               <>
                 <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                {isPaid ? "Analysing…" : "Initialising payment…"}
-              </>
-            ) : !isPaid ? (
-              <>
-                <Lock className="w-4 h-4" />
-                ₦5,000 — Analyse Tender
+                Analysing…
               </>
             ) : (
               <>
@@ -388,21 +342,6 @@ export default function Analysis() {
         </div>
       </div>
 
-      {/* Payment gate banner — shown only when unpaid and tender is selected */}
-      {!isPaid && tender && (
-        <div className="card p-4 flex items-center gap-4 bg-amber-50 border-amber-200">
-          <div className="w-9 h-9 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center shrink-0">
-            <Lock className="w-4 h-4 text-amber-700" />
-          </div>
-          <div className="flex-1">
-            <p className="font-semibold text-amber-900 text-sm">One-time payment required</p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              A secure ₦5,000 Paystack payment unlocks this analysis. Your card details never touch our servers.
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Context cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="card p-4 flex items-start gap-3">
@@ -412,7 +351,7 @@ export default function Analysis() {
           <div className="min-w-0">
             <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">Company</p>
             <p className="font-semibold text-slate-900 text-sm mt-0.5 truncate">{profile?.name || "—"}</p>
-            <p className="text-xs text-slate-500">{profile?.rcNumber} · {docs.length} document{docs.length !== 1 ? "s" : ""}</p>
+            <p className="text-xs text-slate-500">{profile?.rcNumber}</p>
           </div>
         </div>
         <div className="card p-4 flex items-start gap-3">
@@ -451,6 +390,79 @@ export default function Analysis() {
         </div>
       )}
 
+      {/* ── BULK FILE BUNDLE UPLOADER ── */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <FolderOpen className="w-4 h-4 text-brand-600" />
+          <h2 className="text-base font-bold text-slate-900">Upload Document Bundle</h2>
+          <span className="text-xs text-slate-400 font-normal ml-1">— drop your entire compliance folder at once</span>
+        </div>
+
+        {/* Drop zone */}
+        <div
+          onDrop={handleDrop}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onClick={() => fileRef.current?.click()}
+          className={`relative border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-200 ${
+            dragOver
+              ? "border-brand-400 bg-brand-50 scale-[1.01] shadow-lg"
+              : "border-slate-200 hover:border-brand-300 hover:bg-brand-50/40"
+          }`}
+        >
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/pdf"
+            multiple
+            className="hidden"
+            onChange={(e) => addFiles(e.target.files)}
+          />
+          <div className="w-16 h-16 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center mx-auto mb-4">
+            <Upload className="w-8 h-8 text-brand-500" />
+          </div>
+          <p className="font-bold text-slate-700 text-base">Drag & Drop Your File Bundle Here</p>
+          <p className="text-sm text-slate-400 mt-1.5 max-w-md mx-auto">
+            Select all your compliance PDFs at once — BidReady AI will automatically identify and classify all 11 document categories
+          </p>
+          <div className="flex flex-wrap justify-center gap-1.5 mt-4">
+            {ELEVEN_CATEGORIES.map((cat) => (
+              <span key={cat} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{cat}</span>
+            ))}
+          </div>
+          <p className="text-xs text-brand-500 font-semibold mt-4">Click to browse or drag & drop · PDF files only</p>
+        </div>
+
+        {/* Uploaded files list */}
+        {uploadedFiles.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              {uploadedFiles.length} file{uploadedFiles.length !== 1 ? "s" : ""} ready for analysis
+            </p>
+            {uploadedFiles.map((file) => (
+              <div
+                key={file.name}
+                className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100 hover:border-brand-200 transition-colors"
+              >
+                <div className="w-8 h-8 rounded-lg bg-brand-50 border border-brand-100 flex items-center justify-center shrink-0">
+                  <FileText className="w-4 h-4 text-brand-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-800 truncate">{file.name}</p>
+                  <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(1)} KB · PDF</p>
+                </div>
+                <button
+                  onClick={() => removeFile(file.name)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-danger-500 hover:bg-danger-50 transition-colors shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Error */}
       {error && (
         <div className="card p-4 bg-danger-50 border-danger-200 flex items-start gap-3">
@@ -466,11 +478,9 @@ export default function Analysis() {
       {loading && (
         <div className="card p-12 text-center">
           <div className="w-16 h-16 rounded-full border-4 border-brand-100 border-t-brand-500 animate-spin mx-auto mb-4" />
-          <p className="font-semibold text-slate-700">
-            {isPaid ? "Analysing compliance…" : "Confirming payment…"}
-          </p>
+          <p className="font-semibold text-slate-700">Analysing compliance…</p>
           <p className="text-sm text-slate-400 mt-1">
-            {isPaid ? "Gemini AI is reviewing your tender requirements" : "Please complete the Paystack checkout"}
+            Gemini AI is extracting and classifying your {uploadedFiles.length} document{uploadedFiles.length !== 1 ? "s" : ""}
           </p>
         </div>
       )}
@@ -509,7 +519,7 @@ export default function Analysis() {
           <div>
             <h2 className="text-base font-bold text-slate-900 mb-3 flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-brand-600" />
-              Requirement Checklist
+              11-Document Requirement Checklist
             </h2>
             <div className="space-y-2">
               {result.requirements.map((req, i) => (
