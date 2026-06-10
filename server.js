@@ -16,8 +16,6 @@ app.use(express.json({ limit: "10mb" }));
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 function truncate(text, maxChars) {
   if (!text) return "";
   return text.length > maxChars ? text.slice(0, maxChars) + "…" : text;
@@ -38,34 +36,77 @@ const ELEVEN_CATEGORIES = [
   "Audited Financial Accounts Statement",
 ];
 
-// Categories that are permanently MET when found — no expiry check
-const ALWAYS_MET_CATEGORIES = [
-  "CAC Registration Documents",
-  "Sworn Affidavit of Due Process",
-  "Evidence of Financial Capability",
-  "Evidence of 3 Similar Jobs",
-  "Company Profile with CVs",
-];
-
 // Validation baseline date for expiry checks
 const BASELINE_DATE = new Date("2026-12-31");
 const BASELINE_STR  = "2026-12-31";
 
+// ─── Fast-path keyword matchers for permanent-MET categories ──────────────
+// Checked against filename + first 600 chars of PDF — no AI call needed
+const FAST_PATH_MATCHERS = [
+  {
+    category: "CAC Registration Documents",
+    patterns: [/\bcac\b/i, /certificate of incorporation/i, /corporate affairs commission/i, /\bRC\s*\d{4,}/i, /\bincorporation\b/i],
+  },
+  {
+    category: "Sworn Affidavit of Due Process",
+    patterns: [/\baffidavit\b/i, /sworn\s+statement/i, /statutory\s+declaration/i, /due\s+process/i],
+  },
+  {
+    category: "Evidence of Financial Capability",
+    patterns: [/financial\s+capabilit/i, /\bbank\s+statement/i, /letter\s+of\s+credit/i, /financial\s+capacit/i, /net\s+worth/i],
+  },
+  {
+    category: "Evidence of 3 Similar Jobs",
+    patterns: [/similar\s+jobs/i, /similar\s+works/i, /letter\s+of\s+award/i, /completion\s+certificate/i, /previous\s+contract/i, /reference\s+letter/i],
+  },
+  {
+    category: "Company Profile with CVs",
+    patterns: [/company\s+profile/i, /curriculum\s+vitae/i, /\bcv\b(?!\s*\d)/i, /corporate\s+profile/i, /key\s+personnel/i, /organisational\s+profile/i],
+  },
+];
+
+// Quick scan: parse only the first 3 pages, return up to 600 chars
+async function quickScanPDF(buffer) {
+  try {
+    const data = await pdfParse(buffer, { max: 3 });
+    return data.text.replace(/\s+/g, " ").trim().slice(0, 600);
+  } catch {
+    return "";
+  }
+}
+
+// Regulatory extract: first 5 pages, up to 2,000 chars for date detection
+async function extractRegulatoryCert(buffer) {
+  try {
+    const data = await pdfParse(buffer, { max: 5 });
+    return data.text.replace(/\s+/g, " ").trim().slice(0, 2000);
+  } catch {
+    return "";
+  }
+}
+
+// Try to fast-path classify a file by filename + quick-scan text
+function fastPathMatch(filename, scanText) {
+  const haystack = `${filename} ${scanText}`;
+  for (const { category, patterns } of FAST_PATH_MATCHERS) {
+    if (patterns.some((rx) => rx.test(haystack))) {
+      return category;
+    }
+  }
+  return null;
+}
+
 // ─── Server-side date math post-processing ─────────────────────────────────
 function applyDateMath(requirements) {
+  const alwaysMetSet = new Set(FAST_PATH_MATCHERS.map((m) => m.category));
   return requirements.map((req) => {
-    const isAlwaysMet = ALWAYS_MET_CATEGORIES.some((cat) =>
-      req.name.toLowerCase().includes(cat.toLowerCase().split(" ")[0]) ||
-      cat.toLowerCase().includes(req.name.toLowerCase().split(" ")[0])
-    );
-
-    if (isAlwaysMet && req.status !== "MISSING") {
+    if (alwaysMetSet.has(req.name) && req.status !== "MISSING") {
       return { ...req, status: "MET" };
     }
-
-    if (!isAlwaysMet && req.status === "MET") {
-      const notes = req.notes || "";
-      const dateMatch = notes.match(/(\d{4}-\d{2}-\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{1,2}\s+\w+\s+\d{4})/);
+    if (!alwaysMetSet.has(req.name) && req.status === "MET") {
+      const dateMatch = (req.notes || "").match(
+        /(\d{4}-\d{2}-\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{1,2}\s+\w+\s+\d{4})/
+      );
       if (dateMatch) {
         const parsed = new Date(dateMatch[0]);
         if (!isNaN(parsed) && parsed < BASELINE_DATE) {
@@ -73,7 +114,6 @@ function applyDateMath(requirements) {
         }
       }
     }
-
     return req;
   });
 }
@@ -83,7 +123,7 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// ─── Gemini Analysis (multipart file bundle) ──────────────────────────────
+// ─── Gemini Analysis — optimized 3-stage pipeline ─────────────────────────
 app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -109,109 +149,175 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
   }
 
   try {
-    // Extract text from each uploaded PDF (8,000-char window per file)
-    const extractedDocs = await Promise.all(
+    // ── STAGE 1: Parallel quick scan — first 3 pages, 200 chars/page ─────
+    const scanned = await Promise.all(
       files.map(async (file) => {
-        try {
-          const data = await pdfParse(file.buffer);
-          const text = truncate(data.text.replace(/\s+/g, " ").trim(), 8000);
-          return { filename: file.originalname, text };
-        } catch {
-          return { filename: file.originalname, text: `[Could not extract text from ${file.originalname}]` };
-        }
+        const scanText = await quickScanPDF(file.buffer);
+        return { file, scanText };
       })
     );
 
-    const docBlock = extractedDocs
-      .map((d, i) => `--- Document ${i + 1}: ${d.filename} ---\n${d.text}`)
-      .join("\n\n");
+    // ── STAGE 2: Fast-path pre-classification (no AI needed) ─────────────
+    // Build a response buffer seeded with MISSING for all 11 categories
+    const responseBuffer = Object.fromEntries(
+      ELEVEN_CATEGORIES.map((cat) => [cat, { name: cat, status: "MISSING", notes: "No matching document uploaded." }])
+    );
 
-    const tenderBlock = truncate(tenderText, 3000);
+    // Files that matched a fast-path category are resolved immediately
+    const fastPathSet = new Set(FAST_PATH_MATCHERS.map((m) => m.category));
+    const regulatoryFiles = [];
 
-    const prompt = `You are a strict Nigerian government procurement compliance AI. Your task is:
-1. Auto-classify each uploaded document into one of the 11 required categories below.
-2. Evaluate overall compliance of the company against the tender requirements.
+    for (const { file, scanText } of scanned) {
+      const matched = fastPathMatch(file.originalname, scanText);
+      if (matched) {
+        // Mark MET immediately — no date extraction, no AI
+        responseBuffer[matched] = {
+          name: matched,
+          status: "MET",
+          notes: `Matched from uploaded file: ${file.originalname}`,
+        };
+      } else {
+        // Queue for regulatory cert extraction + AI classification
+        regulatoryFiles.push({ file, scanText });
+      }
+    }
+
+    // ── STAGE 3: AI classification — only unresolved regulatory cert files ─
+    // How many fast-path categories still need resolution via AI
+    const unresolvedFastPath = FAST_PATH_MATCHERS
+      .filter(({ category }) => responseBuffer[category].status === "MISSING")
+      .map(({ category }) => category);
+
+    if (regulatoryFiles.length > 0 || unresolvedFastPath.length > 0) {
+      // Extract regulatory cert text in parallel (first 5 pages, 2,000 chars)
+      const regExtracted = await Promise.all(
+        regulatoryFiles.map(async ({ file }) => {
+          const text = await extractRegulatoryCert(file.buffer);
+          return { filename: file.originalname, text };
+        })
+      );
+
+      // Only include unresolved categories in the AI prompt
+      const unresolvedCategories = ELEVEN_CATEGORIES.filter(
+        (cat) => responseBuffer[cat].status === "MISSING"
+      );
+
+      const docBlock = regExtracted.length > 0
+        ? regExtracted.map((d, i) => `--- Doc ${i + 1}: ${d.filename} ---\n${d.text}`).join("\n\n")
+        : "No additional documents to classify.";
+
+      const prompt = `You are a Nigerian government procurement compliance AI.
 
 VALIDATION BASELINE DATE: ${BASELINE_STR}
+COMPANY: ${companyProfile.name} (RC: ${companyProfile.rcNumber || "N/A"})
+TENDER: ${truncate(tenderName, 100)}
+TENDER EXCERPT: ${truncate(tenderText, 1500)}
 
-COMPANY PROFILE:
-Company Name : ${companyProfile.name}
-Industry     : ${companyProfile.industry || "N/A"}
-RC Number    : ${companyProfile.rcNumber || "N/A"}
+━━━ UNRESOLVED DOCUMENT CATEGORIES (classify these only) ━━━
+${unresolvedCategories.map((c, i) => `${i + 1}. ${c}`).join("\n")}
 
-━━━ 11 REQUIRED DOCUMENT CATEGORIES ━━━
-${ELEVEN_CATEGORIES.map((c, i) => `${i + 1}. ${c}`).join("\n")}
-
-━━━ UPLOADED DOCUMENTS (auto-classify each) ━━━
+━━━ UPLOADED DOCUMENTS FOR CLASSIFICATION ━━━
 ${docBlock}
 
-━━━ TENDER REQUIREMENTS ━━━
-Tender: ${truncate(tenderName, 120)}
-${tenderBlock}
+━━━ RULES ━━━
+For each unresolved category above:
+- Regulatory certs (Tax Clearance, PENCOM, NSITF, ITF, BPP, Audited Financials): extract expiry date from text. If expiry < ${BASELINE_STR} → EXPIRED. If valid or no expiry found → MET. If no doc → MISSING.
+- Audited Financial Accounts: present → MET, absent → MISSING.
+- Any permanent category still listed (CAC, Affidavit, Financial Capability, Similar Jobs, Company Profile): MET if a doc matches, else MISSING.
 
-━━━ CLASSIFICATION & EVALUATION RULES ━━━
-For each of the 11 categories, determine whether it is MET, MISSING, or EXPIRED:
+SCORING for missing/expired among the unresolved set:
+- Deduct 15 pts per MISSING critical (Tax Clearance, PENCOM, NSITF, Audited Financials)
+- Deduct 10 pts per EXPIRED
+- Deduct 5 pts per MISSING non-critical
 
-PERMANENT MET CATEGORIES (mark MET if the document content matches — do NOT apply expiry logic):
-- CAC Registration Documents: any CAC certificate, certificate of incorporation, business name registration
-- Sworn Affidavit of Due Process: any sworn statement, affidavit, statutory declaration
-- Evidence of Financial Capability: bank statement, letter of credit, financial capacity proof
-- Evidence of 3 Similar Jobs: letters of award, completion certificates, contracts for similar projects
-- Company Profile with CVs: company profile document, staff CVs, personnel records
-
-REGULATORY CERTIFICATES (apply expiry logic — baseline date is ${BASELINE_STR}):
-- Tax Clearance Certificate (FIRS): extract any expiry/validity date from the document text. If expiry date < ${BASELINE_STR} → EXPIRED. If valid → MET. If not found → MISSING.
-- PENCOM Compliance Certificate: same expiry rule.
-- NSITF Certificate: same expiry rule.
-- ITF Compliance Certificate: same expiry rule.
-- BPP Federal Contractor Certificate: same expiry rule.
-- Audited Financial Accounts Statement: check if accounts are for the last 3 years relative to ${BASELINE_STR}. If present → MET, else → MISSING.
-
-If a category has no matching uploaded document → MISSING.
-
-SCORING (start at 100):
-- Deduct 15 pts per MISSING critical doc (Tax Clearance, PENCOM, NSITF, CAC, Audited Financials)
-- Deduct 10 pts per EXPIRED document
-- Deduct 5 pts per MISSING non-critical document
-
-Respond with ONLY a valid JSON object — no markdown, no code fences, no extra text:
+Respond ONLY with valid JSON — no markdown, no extra text:
 {
-  "score": <integer 0-100>,
-  "summary": "<one concise sentence referencing the company name and overall compliance posture>",
+  "partial_score_adjustment": <integer, negative or 0, reflecting deductions for unresolved categories only>,
   "requirements": [
-    {
-      "name": "<one of the 11 category names exactly>",
-      "status": "<MET|MISSING|EXPIRED>",
-      "notes": "<specific explanation — reference the matched filename, extracted expiry date if applicable, or reason for MISSING>"
-    }
+    {"name": "<exact category name>", "status": "<MET|MISSING|EXPIRED>", "notes": "<brief explanation with filename or expiry date>"}
   ],
-  "feedback": "<4-5 sentences of concrete, actionable procurement advice specific to the gaps found>"
+  "feedback": "<4-5 sentences of concrete procurement advice targeting the gaps>"
 }
+The "requirements" array must contain exactly ${unresolvedCategories.length} entries, one per unresolved category listed above.`;
 
-The "requirements" array MUST contain exactly 11 entries, one per category, in the same order listed above.`;
+      const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1" } });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-lite",
+        contents: prompt,
+      });
 
-    await delay(3000);
+      const raw = response.text.trim();
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("Gemini returned invalid JSON. Raw: " + truncate(raw, 200));
 
-    const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1" } });
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-lite",
-      contents: prompt,
+      const aiResult = JSON.parse(jsonMatch[0]);
+
+      // Merge AI results into the response buffer
+      for (const req of (aiResult.requirements || [])) {
+        if (responseBuffer[req.name] !== undefined) {
+          responseBuffer[req.name] = req;
+        }
+      }
+
+      // Build final requirements list preserving the canonical order
+      const finalRequirements = applyDateMath(
+        ELEVEN_CATEGORIES.map((cat) => responseBuffer[cat])
+      );
+
+      // Calculate score: start at 100, apply deductions
+      let score = 100;
+      for (const req of finalRequirements) {
+        const isCritical = ["Tax Clearance Certificate (FIRS)", "PENCOM Compliance Certificate",
+          "NSITF Certificate", "CAC Registration Documents", "Audited Financial Accounts Statement"].includes(req.name);
+        if (req.status === "MISSING") score -= isCritical ? 15 : 5;
+        else if (req.status === "EXPIRED") score -= 10;
+      }
+      score = Math.max(0, Math.min(100, score));
+
+      const metCount     = finalRequirements.filter((r) => r.status === "MET").length;
+      const missingCount = finalRequirements.filter((r) => r.status === "MISSING").length;
+      const expiredCount = finalRequirements.filter((r) => r.status === "EXPIRED").length;
+      const complianceLabel = score >= 70 ? "compliant" : score >= 40 ? "partially compliant" : "non-compliant";
+
+      return res.json({
+        success: true,
+        result: {
+          score,
+          summary: `${companyProfile.name} is ${complianceLabel} with ${metCount} of 11 requirements met, ${missingCount} missing and ${expiredCount} expired.`,
+          requirements: finalRequirements,
+          feedback: aiResult.feedback || "Please address the missing and expired documents before submission.",
+        },
+      });
+    }
+
+    // All 11 categories resolved via fast-path — no AI call needed
+    const finalRequirements = applyDateMath(
+      ELEVEN_CATEGORIES.map((cat) => responseBuffer[cat])
+    );
+
+    let score = 100;
+    for (const req of finalRequirements) {
+      const isCritical = ["Tax Clearance Certificate (FIRS)", "PENCOM Compliance Certificate",
+        "NSITF Certificate", "CAC Registration Documents", "Audited Financial Accounts Statement"].includes(req.name);
+      if (req.status === "MISSING") score -= isCritical ? 15 : 5;
+      else if (req.status === "EXPIRED") score -= 10;
+    }
+    score = Math.max(0, Math.min(100, score));
+
+    const metCount     = finalRequirements.filter((r) => r.status === "MET").length;
+    const missingCount = finalRequirements.filter((r) => r.status === "MISSING").length;
+    const complianceLabel = score >= 70 ? "compliant" : score >= 40 ? "partially compliant" : "non-compliant";
+
+    return res.json({
+      success: true,
+      result: {
+        score,
+        summary: `${companyProfile.name} is ${complianceLabel} with ${metCount} of 11 requirements met and ${missingCount} missing.`,
+        requirements: finalRequirements,
+        feedback: "All detected documents have been classified. Ensure all regulatory certificates remain valid before tender submission.",
+      },
     });
 
-    const raw = response.text.trim();
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Gemini did not return valid JSON. Raw: " + truncate(raw, 300));
-    }
-
-    const analysisResult = JSON.parse(jsonMatch[0]);
-
-    // Enforce server-side date math rules
-    if (Array.isArray(analysisResult.requirements)) {
-      analysisResult.requirements = applyDateMath(analysisResult.requirements);
-    }
-
-    res.json({ success: true, result: analysisResult });
   } catch (err) {
     console.error("Analysis error:", err?.message || err);
     res.status(500).json({ error: err?.message || "Analysis failed. Please try again." });
