@@ -89,14 +89,14 @@ function RequirementRow({ req, index }) {
 
 export default function Analysis() {
   const navigate = useNavigate();
-  const [result, setResult]         = useState(null);
-  const [loading, setLoading]       = useState(false);
-  const [error, setError]           = useState(null);
-  const [tender, setTender]         = useState(null);
-  const [profile, setProfile]       = useState(null);
+  const [result, setResult]               = useState(null);
+  const [loading, setLoading]             = useState(false);
+  const [error, setError]                 = useState(null);
+  const [tender, setTender]               = useState(null);
+  const [profile, setProfile]             = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
-  const [dragOver, setDragOver]     = useState(false);
-  const fileRef                     = useRef();
+  const [dragOver, setDragOver]           = useState(false);
+  const fileRef                           = useRef();
 
   useEffect(() => {
     const p = localStorage.getItem("bidready_profile");
@@ -105,22 +105,29 @@ export default function Analysis() {
     if (t) setTender(JSON.parse(t));
   }, []);
 
+  // Every new drop/selection completely replaces the file list and wipes
+  // any previous analysis result so no stale data leaks into the next run.
   function addFiles(newFiles) {
     const pdfs = Array.from(newFiles).filter((f) => f.type === "application/pdf");
     if (pdfs.length === 0) {
       setError("Only PDF files are accepted. Please upload PDF documents.");
       return;
     }
+    // Hard-reset: discard old file references and any prior requirements state
+    setResult(null);
     setError(null);
-    setUploadedFiles((prev) => {
-      const existing = new Set(prev.map((f) => f.name));
-      const unique = pdfs.filter((f) => !existing.has(f.name));
-      return [...prev, ...unique];
-    });
+    setUploadedFiles(pdfs);
+    // Clear the input value so the same file path can be re-selected next time
+    if (fileRef.current) fileRef.current.value = "";
   }
 
   function removeFile(name) {
-    setUploadedFiles((prev) => prev.filter((f) => f.name !== name));
+    setUploadedFiles((prev) => {
+      const next = prev.filter((f) => f.name !== name);
+      // If the list becomes empty, also wipe the result
+      if (next.length === 0) setResult(null);
+      return next;
+    });
   }
 
   function handleDrop(e) {
@@ -148,6 +155,9 @@ export default function Analysis() {
     setResult(null);
 
     try {
+      // Build FormData — each File object from the live uploadedFiles array is
+      // appended directly as a multipart stream to /api/analyze so the server
+      // receives the full, untruncated binary of every newly selected file.
       const formData = new FormData();
       formData.append("companyProfile", JSON.stringify(profile));
       formData.append("tenderText", tender.content);
@@ -305,6 +315,11 @@ export default function Analysis() {
   const missing = result?.requirements?.filter((r) => r.status === "MISSING") || [];
   const expired = result?.requirements?.filter((r) => r.status === "EXPIRED") || [];
 
+  // Calculate total pages across all uploaded files for the loading message
+  const totalFilesLabel = uploadedFiles.length === 1
+    ? `1 document`
+    : `${uploadedFiles.length} documents`;
+
   return (
     <div className="space-y-6 animate-fade-in-up">
       {/* Header */}
@@ -335,7 +350,7 @@ export default function Analysis() {
             ) : (
               <>
                 <Sparkles className="w-4 h-4" />
-                {result ? "Re-Analyse" : "Run Analysis"}
+                ✨ Run Compliance Analysis
               </>
             )}
           </button>
@@ -410,13 +425,17 @@ export default function Analysis() {
               : "border-slate-200 hover:border-brand-300 hover:bg-brand-50/40"
           }`}
         >
+          {/* Hidden input — value cleared after every selection so the same
+              file can be re-dropped without the browser ignoring the event */}
           <input
             ref={fileRef}
             type="file"
             accept="application/pdf"
             multiple
             className="hidden"
-            onChange={(e) => addFiles(e.target.files)}
+            onChange={(e) => {
+              addFiles(e.target.files);
+            }}
           />
           <div className="w-16 h-16 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center mx-auto mb-4">
             <Upload className="w-8 h-8 text-brand-500" />
@@ -452,7 +471,7 @@ export default function Analysis() {
                   <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(1)} KB · PDF</p>
                 </div>
                 <button
-                  onClick={() => removeFile(file.name)}
+                  onClick={(e) => { e.stopPropagation(); removeFile(file.name); }}
                   className="p-1.5 rounded-lg text-slate-400 hover:text-danger-500 hover:bg-danger-50 transition-colors shrink-0"
                 >
                   <X className="w-4 h-4" />
@@ -478,9 +497,9 @@ export default function Analysis() {
       {loading && (
         <div className="card p-12 text-center">
           <div className="w-16 h-16 rounded-full border-4 border-brand-100 border-t-brand-500 animate-spin mx-auto mb-4" />
-          <p className="font-semibold text-slate-700">Analysing compliance…</p>
+          <p className="font-semibold text-slate-700">Running Compliance Analysis…</p>
           <p className="text-sm text-slate-400 mt-1">
-            Gemini AI is extracting and classifying your {uploadedFiles.length} document{uploadedFiles.length !== 1 ? "s" : ""}
+            Extracting all pages from {totalFilesLabel} and running AI classification — this may take a moment for large bundles
           </p>
         </div>
       )}
