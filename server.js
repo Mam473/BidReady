@@ -337,6 +337,6 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-app.listen(PORT, "localhost", () => {
-  console.log(`BidReady API running on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`BidReady API running on http://0.0.0.0:${PORT}`);
 });

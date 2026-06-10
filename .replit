@@ -51,6 +51,10 @@ run = ["bash", "-c", "node server.js & cd client && npx serve dist -l 5000"]
 build = ["bash", "-c", "cd client && npm run build"]
 
 [[ports]]
+localPort = 3001
+externalPort = 3000
+
+[[ports]]
 localPort = 5000
 externalPort = 80
 
