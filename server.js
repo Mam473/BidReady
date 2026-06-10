@@ -96,22 +96,31 @@ function fastPathMatch(filename, scanText) {
   return null;
 }
 
-// ─── Server-side date math post-processing ─────────────────────────────────
-function applyDateMath(requirements) {
-  const alwaysMetSet = new Set(FAST_PATH_MATCHERS.map((m) => m.category));
+// ─── Status evaluation — two strict rules ─────────────────────────────────
+// RULE 1: Static/capability docs → always MET if present (no expiry check)
+// RULE 2: Regulatory certs → strict date check against 2026-12-31
+function enforceStatusRules(requirements) {
+  const competitionBaseline = new Date("2026-12-31");
   return requirements.map((req) => {
-    if (alwaysMetSet.has(req.name) && req.status !== "MISSING") {
-      return { ...req, status: "MET" };
-    }
-    if (!alwaysMetSet.has(req.name) && req.status === "MET") {
-      const dateMatch = (req.notes || "").match(
-        /(\d{4}-\d{2}-\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{1,2}\s+\w+\s+\d{4})/
+    if (req.status !== "MISSING") {
+      const isStatic = ["CAC", "Affidavit", "Financial Capability", "Similar Jobs"].some(
+        (keyword) => req.name.includes(keyword)
       );
-      if (dateMatch) {
-        const parsed = new Date(dateMatch[0]);
-        if (!isNaN(parsed) && parsed < BASELINE_DATE) {
-          return { ...req, status: "EXPIRED" };
+      if (isStatic) {
+        req.status   = "MET";
+        req.feedback = "Document successfully verified and authenticated as active.";
+      } else if (req.expiryDate) {
+        const expDate = new Date(req.expiryDate);
+        if (expDate < competitionBaseline) {
+          req.status   = "EXPIRED";
+          req.feedback = `CRITICAL VALIDATION FAILURE: This certificate expired on ${req.expiryDate} and is invalid for a submission baseline of 2026-12-31.`;
+        } else {
+          req.status   = "MET";
+          req.feedback = `Validated: Active and compliant until ${req.expiryDate}`;
         }
+      } else {
+        req.status   = "EXPIRED";
+        req.feedback = "CRITICAL: Certificate text detected, but no valid upcoming expiration date could be extracted.";
       }
     }
     return req;
@@ -219,22 +228,29 @@ ${unresolvedCategories.map((c, i) => `${i + 1}. ${c}`).join("\n")}
 ━━━ UPLOADED DOCUMENTS FOR CLASSIFICATION ━━━
 ${docBlock}
 
-━━━ RULES ━━━
-For each unresolved category above:
-- Regulatory certs (Tax Clearance, PENCOM, NSITF, ITF, BPP, Audited Financials): extract expiry date from text. If expiry < ${BASELINE_STR} → EXPIRED. If valid or no expiry found → MET. If no doc → MISSING.
-- Audited Financial Accounts: present → MET, absent → MISSING.
-- Any permanent category still listed (CAC, Affidavit, Financial Capability, Similar Jobs, Company Profile): MET if a doc matches, else MISSING.
+━━━ CLASSIFICATION RULES ━━━
+For each unresolved category above, classify the document and set status:
 
-SCORING for missing/expired among the unresolved set:
-- Deduct 15 pts per MISSING critical (Tax Clearance, PENCOM, NSITF, Audited Financials)
-- Deduct 10 pts per EXPIRED
-- Deduct 5 pts per MISSING non-critical
+STATIC/CAPABILITY (no expiry check — status is FOUND or MISSING):
+- CAC Registration Documents, Sworn Affidavit, Evidence of Financial Capability, Evidence of Similar Jobs, Company Profile with CVs
+→ If a matching document is present: status = "FOUND". If absent: status = "MISSING".
+
+REGULATORY CERTIFICATES (expiry extraction required):
+- Tax Clearance (FIRS), PENCOM, NSITF, ITF, BPP, Audited Financial Accounts
+→ Search the document text for any expiry or validity date (e.g. "valid until", "expires", "valid through", year patterns).
+→ If a date is found: set status = "FOUND" and expiryDate = "<YYYY-MM-DD>".
+→ If no date found but the document text is present: set status = "FOUND" and omit expiryDate.
+→ If no document uploaded for this category: status = "MISSING", omit expiryDate.
 
 Respond ONLY with valid JSON — no markdown, no extra text:
 {
-  "partial_score_adjustment": <integer, negative or 0, reflecting deductions for unresolved categories only>,
   "requirements": [
-    {"name": "<exact category name>", "status": "<MET|MISSING|EXPIRED>", "notes": "<brief explanation with filename or expiry date>"}
+    {
+      "name": "<exact category name from the list above>",
+      "status": "<FOUND|MISSING>",
+      "expiryDate": "<YYYY-MM-DD or omit if not applicable>",
+      "notes": "<one sentence: matched filename, extracted date, or reason for MISSING>"
+    }
   ],
   "feedback": "<4-5 sentences of concrete procurement advice targeting the gaps>"
 }
@@ -253,14 +269,19 @@ The "requirements" array must contain exactly ${unresolvedCategories.length} ent
       const aiResult = JSON.parse(jsonMatch[0]);
 
       // Merge AI results into the response buffer
+      // Normalise AI's intermediate "FOUND" → "MET" before rule enforcement
       for (const req of (aiResult.requirements || [])) {
         if (responseBuffer[req.name] !== undefined) {
-          responseBuffer[req.name] = req;
+          responseBuffer[req.name] = {
+            ...req,
+            status: req.status === "FOUND" ? "MET" : req.status,
+          };
         }
       }
 
       // Build final requirements list preserving the canonical order
-      const finalRequirements = applyDateMath(
+      // enforceStatusRules applies Rule 1 (static → MET) and Rule 2 (date check)
+      const finalRequirements = enforceStatusRules(
         ELEVEN_CATEGORIES.map((cat) => responseBuffer[cat])
       );
 
@@ -291,7 +312,7 @@ The "requirements" array must contain exactly ${unresolvedCategories.length} ent
     }
 
     // All 11 categories resolved via fast-path — no AI call needed
-    const finalRequirements = applyDateMath(
+    const finalRequirements = enforceStatusRules(
       ELEVEN_CATEGORIES.map((cat) => responseBuffer[cat])
     );
 
