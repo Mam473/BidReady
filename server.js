@@ -546,6 +546,20 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`BidReady API running on http://0.0.0.0:${PORT}`);
-});
+function startServer(port, attempt = 1) {
+  const server = app.listen(port, "0.0.0.0", () => {
+    console.log(`BidReady API running on http://0.0.0.0:${port}`);
+  });
+
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE" && attempt <= 5) {
+      console.warn(`Port ${port} busy (attempt ${attempt}/5) — retrying in ${attempt * 500}ms…`);
+      setTimeout(() => startServer(port, attempt + 1), attempt * 500);
+    } else {
+      console.error("Server failed to start:", err.message);
+      process.exit(1);
+    }
+  });
+}
+
+startServer(PORT);
