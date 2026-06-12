@@ -16,6 +16,34 @@ app.use(express.json({ limit: "10mb" }));
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
+// ─── Schema bootstrap — idempotent, runs once on every startup ─────────────
+async function initSchema() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id                SERIAL PRIMARY KEY,
+        user_id           TEXT        NOT NULL DEFAULT 'anonymous',
+        plan_name         TEXT        NOT NULL,
+        amount            INTEGER     NOT NULL,
+        payment_reference TEXT        NOT NULL UNIQUE,
+        payment_status    TEXT        NOT NULL DEFAULT 'pending',
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_payments_user_id
+        ON payments (user_id);
+      CREATE INDEX IF NOT EXISTS idx_payments_status
+        ON payments (payment_status);
+      CREATE INDEX IF NOT EXISTS idx_payments_reference
+        ON payments (payment_reference);
+    `);
+    console.log("Database schema initialised.");
+  } catch (err) {
+    console.error("Schema init error:", err.message);
+  }
+}
+initSchema();
+
 function truncate(text, maxChars) {
   if (!text) return "";
   return text.length > maxChars ? text.slice(0, maxChars) + "…" : text;
