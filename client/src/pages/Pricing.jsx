@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import React from "react";
 import { Shield, Zap, Users, CheckCircle, ArrowRight, Lock } from "lucide-react";
 
 const PLANS = [
@@ -7,7 +6,7 @@ const PLANS = [
     id: "single",
     name: "Single Tender Analysis",
     price: 5000,
-    amountKobo: 500000,
+    paystackUrl: "https://paystack.shop/pay/vpngl2qzbr",
     icon: Zap,
     color: "from-blue-500 to-blue-600",
     badge: null,
@@ -23,7 +22,7 @@ const PLANS = [
     id: "sme",
     name: "SME Monthly Plan",
     price: 8000,
-    amountKobo: 800000,
+    paystackUrl: "https://paystack.shop/pay/br-advanced-2026",
     icon: Shield,
     color: "from-brand-500 to-brand-600",
     badge: "Most Popular",
@@ -40,7 +39,7 @@ const PLANS = [
     id: "consultant",
     name: "Consultant Plan",
     price: 20000,
-    amountKobo: 2000000,
+    paystackUrl: "https://paystack.shop/pay/br-unlimited",
     icon: Users,
     color: "from-purple-500 to-purple-600",
     badge: "Best Value",
@@ -56,70 +55,6 @@ const PLANS = [
 ];
 
 export default function Pricing() {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState(null);
-
-  const profile = (() => {
-    try {
-      return JSON.parse(localStorage.getItem("bidready_profile") || "{}");
-    } catch {
-      return {};
-    }
-  })();
-
-  const paystackLoaded = typeof window !== "undefined" && typeof window.PaystackPop === "function";
-
-  async function handlePay(plan) {
-    if (!paystackLoaded) return;
-    setLoading(plan.id);
-
-    try {
-      const res = await fetch("/api/payment/initialize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          planId: plan.id,
-          planName: plan.name,
-          amount: plan.amountKobo,
-          userId: profile.rcNumber || "anonymous",
-          email: profile.email || `${(profile.rcNumber || "user").toLowerCase()}@bidready.app`,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.reference) throw new Error(data.error || "Failed to initialize payment");
-
-      setLoading(null);
-
-      const popup = new window.PaystackPop();
-      popup.newTransaction({
-        key: data.publicKey,
-        email: data.email,
-        amount: plan.amountKobo,
-        ref: data.reference,
-        currency: "NGN",
-        metadata: {
-          plan_name: plan.name,
-          user_id: profile.rcNumber || "anonymous",
-          company_name: profile.name || "",
-        },
-        onSuccess(transaction) {
-          localStorage.setItem("bidready_paid_plan", plan.id);
-          localStorage.setItem("bidready_payment_ref", transaction.reference);
-          navigate("/payment-success", {
-            state: { plan: plan.name, reference: transaction.reference },
-          });
-        },
-        onCancel() {
-          setLoading(null);
-        },
-      });
-    } catch (err) {
-      alert(err.message);
-      setLoading(null);
-    }
-  }
-
   return (
     <div className="max-w-5xl mx-auto">
       <div className="text-center mb-10">
@@ -175,26 +110,16 @@ export default function Pricing() {
                 </ul>
 
                 <button
-                  onClick={() => handlePay(plan)}
-                  disabled={loading === plan.id || !paystackLoaded}
+                  onClick={() => window.open(plan.paystackUrl, "_blank", "noopener,noreferrer")}
                   className={`mt-auto w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all ${
                     isPopular
                       ? "bg-brand-500 hover:bg-brand-600 text-white"
                       : "bg-slate-900 hover:bg-slate-700 text-white"
-                  } disabled:opacity-60 disabled:cursor-not-allowed`}
+                  }`}
                 >
-                  {loading === plan.id ? (
-                    <>
-                      <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                      Initializing…
-                    </>
-                  ) : (
-                    <>
-                      <Lock className="w-4 h-4" />
-                      Pay with Paystack
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
+                  <Lock className="w-4 h-4" />
+                  Pay with Paystack
+                  <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </div>
