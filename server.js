@@ -169,6 +169,29 @@ function enforceStatusRules(requirements) {
   });
 }
 
+// ─── Admin auth middleware ─────────────────────────────────────────────────
+// Protects every route under /api/admin/
+// Accepts:  Authorization: Bearer <password>
+//        OR ?password=<password> query param
+function requireAdmin(req, res, next) {
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (!adminPassword) {
+    return res.status(500).json({ error: "ADMIN_PASSWORD is not configured." });
+  }
+
+  const authHeader = req.headers["authorization"] || "";
+  const headerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  const queryToken  = req.query.password || "";
+  const supplied    = headerToken || queryToken;
+
+  if (!supplied || supplied !== adminPassword) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
+app.use("/api/admin", requireAdmin);
+
 // ─── Health ────────────────────────────────────────────────────────────────
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
