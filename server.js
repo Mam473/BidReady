@@ -199,6 +199,38 @@ app.get("/api/health", (req, res) => {
 
 // ─── Gemini Analysis — optimized 3-stage pipeline ─────────────────────────
 app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
+  // ── HYBRID ACCESS GATE ────────────────────────────────────────────────────
+  // Mode 1 — Admin: Authorization: Bearer <ADMIN_PASSWORD>
+  // Mode 2 — Paid:  X-Payment-Reference header with a 'success' DB record
+  // Anything else → 402 Payment Required
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  const authHeader    = req.headers["authorization"] || "";
+  const isAdmin       = adminPassword && authHeader === `Bearer ${adminPassword}`;
+
+  if (!isAdmin) {
+    const payRef = (req.headers["x-payment-reference"] || "").trim();
+    if (!payRef) {
+      return res.status(402).json({
+        error: "Payment required. Please purchase a plan to unlock compliance analyses.",
+      });
+    }
+    try {
+      const payCheck = await db.query(
+        `SELECT payment_status FROM payments WHERE payment_reference = $1 LIMIT 1`,
+        [payRef]
+      );
+      if (payCheck.rows.length === 0 || payCheck.rows[0].payment_status !== "success") {
+        return res.status(402).json({
+          error: "No confirmed payment found for this reference. Please complete your purchase.",
+        });
+      }
+    } catch (err) {
+      console.error("Access gate DB error:", err?.message);
+      return res.status(500).json({ error: "Could not verify payment. Please try again." });
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: "GEMINI_API_KEY is not configured in Secrets." });

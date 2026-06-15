@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   BarChart3, CheckCircle2, XCircle, AlertTriangle, Download,
   Sparkles, FileText, Building2, Clock, Upload, X, FolderOpen,
+  ShieldCheck, Lock, CreditCard,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -87,6 +88,31 @@ function RequirementRow({ req, index }) {
   );
 }
 
+// ─── Access mode constants ─────────────────────────────────────────────────
+// 'admin'  — admin token present in localStorage
+// 'paid'   — confirmed payment reference present in localStorage or URL
+// 'locked' — neither; uploader is blocked
+const ADMIN_KEY   = "bidready_admin_token";
+const PAYMENT_KEY = "bidready_payment_ref";
+
+function resolveAccessMode() {
+  const adminToken = (localStorage.getItem(ADMIN_KEY) || "").trim();
+  if (adminToken) return { mode: "admin", token: adminToken, ref: null };
+
+  // Check URL query string first (?reference=...) then localStorage
+  const urlRef = new URLSearchParams(window.location.search).get("reference") || "";
+  const storedRef = (localStorage.getItem(PAYMENT_KEY) || "").trim();
+  const payRef = urlRef || storedRef;
+
+  if (urlRef && !storedRef) {
+    // Persist URL ref so it survives navigation
+    localStorage.setItem(PAYMENT_KEY, urlRef);
+  }
+  if (payRef) return { mode: "paid", token: null, ref: payRef };
+
+  return { mode: "locked", token: null, ref: null };
+}
+
 export default function Analysis() {
   const navigate = useNavigate();
   const [result, setResult]               = useState(null);
@@ -98,11 +124,15 @@ export default function Analysis() {
   const [dragOver, setDragOver]           = useState(false);
   const fileRef                           = useRef();
 
+  const [access, setAccess] = useState(() => resolveAccessMode());
+
   useEffect(() => {
     const p = localStorage.getItem("bidready_profile");
     const t = localStorage.getItem("bidready_active_tender");
     if (p) setProfile(JSON.parse(p));
     if (t) setTender(JSON.parse(t));
+    // Re-evaluate access in case storage changed since first render
+    setAccess(resolveAccessMode());
   }, []);
 
   // Every new drop/selection completely replaces the file list and wipes
@@ -164,8 +194,17 @@ export default function Analysis() {
       formData.append("tenderName", tender.name);
       uploadedFiles.forEach((f) => formData.append("files", f));
 
+      // Build auth headers based on current access mode
+      const accessHeaders = {};
+      if (access.mode === "admin") {
+        accessHeaders["Authorization"] = `Bearer ${access.token}`;
+      } else if (access.mode === "paid") {
+        accessHeaders["X-Payment-Reference"] = access.ref;
+      }
+
       const res = await fetch("/api/analyze", {
         method: "POST",
+        headers: accessHeaders,
         body: formData,
       });
       const data = await res.json();
@@ -320,6 +359,8 @@ export default function Analysis() {
     ? `1 document`
     : `${uploadedFiles.length} documents`;
 
+  const isLocked = access.mode === "locked";
+
   return (
     <div className="space-y-6 animate-fade-in-up">
       {/* Header */}
@@ -339,7 +380,7 @@ export default function Analysis() {
           )}
           <button
             onClick={runAnalysis}
-            disabled={loading || !tender || uploadedFiles.length === 0}
+            disabled={loading || !tender || uploadedFiles.length === 0 || isLocked}
             className="btn-primary"
           >
             {loading ? (
@@ -356,6 +397,25 @@ export default function Analysis() {
           </button>
         </div>
       </div>
+
+      {/* Access mode banners */}
+      {access.mode === "admin" && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200">
+          <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+          <p className="text-sm font-semibold text-emerald-800">
+            Admin Mode: Free Audits Enabled
+          </p>
+        </div>
+      )}
+      {access.mode === "paid" && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
+          <CreditCard className="w-5 h-5 text-blue-600 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-blue-800">Paid Access Unlocked</p>
+            <p className="text-xs text-blue-600 mt-0.5 font-mono">{access.ref}</p>
+          </div>
+        </div>
+      )}
 
       {/* Context cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -413,7 +473,40 @@ export default function Analysis() {
           <span className="text-xs text-slate-400 font-normal ml-1">— drop your entire compliance folder at once</span>
         </div>
 
-        {/* Drop zone */}
+        {/* Lock overlay — shown when no valid access token or payment ref */}
+        {isLocked ? (
+          <div className="relative rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 overflow-hidden">
+            {/* Blurred preview of the upload zone */}
+            <div className="p-10 text-center select-none pointer-events-none opacity-30 blur-[2px]">
+              <div className="w-16 h-16 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center mx-auto mb-4">
+                <Upload className="w-8 h-8 text-brand-500" />
+              </div>
+              <p className="font-bold text-slate-700 text-base">Drag & Drop Your File Bundle Here</p>
+              <p className="text-sm text-slate-400 mt-1.5">Upload your compliance PDFs for AI classification</p>
+            </div>
+
+            {/* Lock message overlay */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-white/80 backdrop-blur-[1px]">
+              <div className="w-14 h-14 rounded-2xl bg-slate-900 flex items-center justify-center shadow-lg">
+                <Lock className="w-7 h-7 text-white" />
+              </div>
+              <div className="text-center px-6">
+                <p className="text-lg font-bold text-slate-900">Tender Analysis Locked</p>
+                <p className="text-sm text-slate-500 mt-1.5 max-w-xs">
+                  Please select a pricing package to unlock your compliance workspace.
+                </p>
+              </div>
+              <button
+                onClick={() => navigate("/pricing")}
+                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow"
+              >
+                <CreditCard className="w-4 h-4" />
+                View Pricing Plans
+              </button>
+            </div>
+          </div>
+        ) : (
+        /* Drop zone */
         <div
           onDrop={handleDrop}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -451,9 +544,10 @@ export default function Analysis() {
           </div>
           <p className="text-xs text-brand-500 font-semibold mt-4">Click to browse or drag & drop · PDF files only</p>
         </div>
+        )}
 
-        {/* Uploaded files list */}
-        {uploadedFiles.length > 0 && (
+        {/* Uploaded files list — only visible when unlocked */}
+        {!isLocked && uploadedFiles.length > 0 && (
           <div className="space-y-2">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
               {uploadedFiles.length} file{uploadedFiles.length !== 1 ? "s" : ""} ready for analysis
