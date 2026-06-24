@@ -206,7 +206,12 @@ export default function Analysis() {
       if (freshAccess.mode === "admin") {
         accessHeaders["Authorization"] = `Bearer ${freshAccess.token}`;
       } else if (freshAccess.mode === "paid") {
-        accessHeaders["X-Payment-Reference"] = freshAccess.ref;
+        const referenceToken = freshAccess.ref;
+        // Send in all three locations so the server finds it regardless
+        // of which extraction path processes the multipart request first
+        accessHeaders["X-Payment-Reference"] = referenceToken;
+        accessHeaders["Authorization"]        = `Bearer ${referenceToken}`;
+        formData.append("paymentReference", referenceToken);
       } else {
         setLoading(false);
         setError("No payment reference found. Please complete a purchase or log in as admin.");

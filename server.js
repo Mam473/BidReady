@@ -208,7 +208,15 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
   const isAdmin       = adminPassword && authHeader === `Bearer ${adminPassword}`;
 
   if (!isAdmin) {
-    const payRef = (req.headers["x-payment-reference"] || "").trim();
+    // ── Extract payment reference from ALL possible locations ────────────
+    const refFromHeader = (req.headers["x-payment-reference"] || "").trim();
+    const refFromAuth   = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7).trim()
+      : "";
+    const refFromBody   = (req.body?.paymentReference || "").trim();
+
+    const payRef = refFromHeader || refFromBody || refFromAuth;
+
     if (!payRef) {
       return res.status(402).json({
         error: "Payment required. Please purchase a plan to unlock compliance analyses.",
