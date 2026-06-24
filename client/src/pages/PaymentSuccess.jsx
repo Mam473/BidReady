@@ -1,12 +1,22 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { CheckCircle, ArrowRight } from "lucide-react";
+
+const PAYMENT_KEY = "bidready_payment_ref";
 
 export default function PaymentSuccess() {
   const { state } = useLocation();
   const navigate = useNavigate();
   const plan = state?.plan || "Selected Plan";
   const reference = state?.reference || "";
+
+  // Persist the reference immediately so Analysis.jsx can read it from
+  // localStorage regardless of how the user navigates to that page.
+  useEffect(() => {
+    if (reference) {
+      localStorage.setItem(PAYMENT_KEY, reference);
+    }
+  }, [reference]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">

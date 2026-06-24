@@ -194,12 +194,23 @@ export default function Analysis() {
       formData.append("tenderName", tender.name);
       uploadedFiles.forEach((f) => formData.append("files", f));
 
-      // Build auth headers based on current access mode
+      // Re-resolve access fresh at call time — reads the latest localStorage
+      // and URL params so the header is never stale from an earlier render.
+      const freshAccess = resolveAccessMode();
+      // Sync state if it drifted (e.g. reference was saved after initial mount)
+      if (freshAccess.mode !== access.mode || freshAccess.ref !== access.ref) {
+        setAccess(freshAccess);
+      }
+
       const accessHeaders = {};
-      if (access.mode === "admin") {
-        accessHeaders["Authorization"] = `Bearer ${access.token}`;
-      } else if (access.mode === "paid") {
-        accessHeaders["X-Payment-Reference"] = access.ref;
+      if (freshAccess.mode === "admin") {
+        accessHeaders["Authorization"] = `Bearer ${freshAccess.token}`;
+      } else if (freshAccess.mode === "paid") {
+        accessHeaders["X-Payment-Reference"] = freshAccess.ref;
+      } else {
+        setLoading(false);
+        setError("No payment reference found. Please complete a purchase or log in as admin.");
+        return;
       }
 
       const res = await fetch("/api/analyze", {
