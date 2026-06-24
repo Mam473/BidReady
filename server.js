@@ -219,10 +219,49 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
         `SELECT payment_status FROM payments WHERE payment_reference = $1 LIMIT 1`,
         [payRef]
       );
-      if (payCheck.rows.length === 0 || payCheck.rows[0].payment_status !== "success") {
-        return res.status(402).json({
-          error: "No confirmed payment found for this reference. Please complete your purchase.",
-        });
+      const localOk = payCheck.rows.length > 0 && payCheck.rows[0].payment_status === "success";
+
+      if (!localOk) {
+        // ── Fallback: live verification against Paystack API ──────────────
+        const secretKey = process.env.PAYSTACK_SECRET_KEY;
+        let paystackVerified = false;
+
+        if (secretKey) {
+          try {
+            const verifyRes = await fetch(
+              `https://api.paystack.co/transaction/verify/${encodeURIComponent(payRef)}`,
+              {
+                method: "GET",
+                headers: { Authorization: `Bearer ${secretKey}` },
+              }
+            );
+            const verifyData = await verifyRes.json();
+
+            if (verifyData?.data?.status === "success") {
+              paystackVerified = true;
+              const { amount, customer, metadata } = verifyData.data;
+              const userId   = metadata?.user_id   || "anonymous";
+              const planName = metadata?.plan_name  || "unknown";
+
+              await db.query(
+                `INSERT INTO payments (user_id, plan_name, amount, payment_reference, payment_status)
+                 VALUES ($1, $2, $3, $4, 'success')
+                 ON CONFLICT (payment_reference)
+                 DO UPDATE SET payment_status = 'success', updated_at = NOW()`,
+                [userId, planName, amount, payRef]
+              );
+              console.log(`Paystack live-verified and saved: ${payRef} — ₦${amount / 100} from ${customer?.email}`);
+            }
+          } catch (verifyErr) {
+            console.error("Paystack live verification error:", verifyErr?.message);
+          }
+        }
+
+        if (!paystackVerified) {
+          return res.status(402).json({
+            error: "No confirmed payment found for this reference. Please complete your purchase.",
+          });
+        }
       }
     } catch (err) {
       console.error("Access gate DB error:", err?.message);
