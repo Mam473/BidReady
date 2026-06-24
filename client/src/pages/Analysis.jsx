@@ -92,22 +92,26 @@ function RequirementRow({ req, index }) {
 // 'admin'  — admin token present in localStorage
 // 'paid'   — confirmed payment reference present in localStorage or URL
 // 'locked' — neither; uploader is blocked
-const ADMIN_KEY   = "bidready_admin_token";
-const PAYMENT_KEY = "bidready_payment_ref";
+const ADMIN_KEY    = "bidready_admin_token";
+const PAYMENT_KEY  = "bidready_payment_ref";   // set by PaymentSuccess on redirect
+const PAYSTACK_KEY = "paystack_reference";      // set here when ?reference= is in URL
 
 function resolveAccessMode() {
   const adminToken = (localStorage.getItem(ADMIN_KEY) || "").trim();
   if (adminToken) return { mode: "admin", token: adminToken, ref: null };
 
-  // Check URL query string first (?reference=...) then localStorage
-  const urlRef = new URLSearchParams(window.location.search).get("reference") || "";
-  const storedRef = (localStorage.getItem(PAYMENT_KEY) || "").trim();
-  const payRef = urlRef || storedRef;
+  // Check URL query string (?reference=...) then all localStorage slots
+  const urlRef      = new URLSearchParams(window.location.search).get("reference") || "";
+  const storedRef1  = (localStorage.getItem(PAYMENT_KEY)  || "").trim();
+  const storedRef2  = (localStorage.getItem(PAYSTACK_KEY) || "").trim();
 
-  if (urlRef && !storedRef) {
-    // Persist URL ref so it survives navigation
-    localStorage.setItem(PAYMENT_KEY, urlRef);
+  // Persist URL ref into both keys before it is stripped by the router
+  if (urlRef) {
+    if (!storedRef1) localStorage.setItem(PAYMENT_KEY,  urlRef);
+    if (!storedRef2) localStorage.setItem(PAYSTACK_KEY, urlRef);
   }
+
+  const payRef = urlRef || storedRef1 || storedRef2;
   if (payRef) return { mode: "paid", token: null, ref: payRef };
 
   return { mode: "locked", token: null, ref: null };
@@ -127,11 +131,19 @@ export default function Analysis() {
   const [access, setAccess] = useState(() => resolveAccessMode());
 
   useEffect(() => {
+    // ── Capture ?reference= immediately on mount before React Router strips it
+    const urlRef = new URLSearchParams(window.location.search).get("reference") || "";
+    if (urlRef) {
+      localStorage.setItem(PAYMENT_KEY,  urlRef);
+      localStorage.setItem(PAYSTACK_KEY, urlRef);
+    }
+
     const p = localStorage.getItem("bidready_profile");
     const t = localStorage.getItem("bidready_active_tender");
     if (p) setProfile(JSON.parse(p));
     if (t) setTender(JSON.parse(t));
-    // Re-evaluate access in case storage changed since first render
+
+    // Re-evaluate access now that localStorage is guaranteed up-to-date
     setAccess(resolveAccessMode());
   }, []);
 
