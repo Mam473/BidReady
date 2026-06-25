@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   BarChart3, CheckCircle2, XCircle, AlertTriangle, Download,
   Sparkles, FileText, Building2, Clock, Upload, X, FolderOpen,
-  ShieldCheck, Lock, CreditCard,
+  ShieldCheck, Lock, CreditCard, KeyRound,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -128,7 +128,25 @@ export default function Analysis() {
   const [dragOver, setDragOver]           = useState(false);
   const fileRef                           = useRef();
 
-  const [access, setAccess] = useState(() => resolveAccessMode());
+  const [access, setAccess]             = useState(() => resolveAccessMode());
+  const [manualRefInput, setManualRefInput] = useState("");
+  const [manualRefError, setManualRefError] = useState("");
+  const [showManualRef,  setShowManualRef]  = useState(false);
+
+  function applyManualRef() {
+    const ref = manualRefInput.trim();
+    if (!ref) {
+      setManualRefError("Please paste your Paystack transaction reference.");
+      return;
+    }
+    localStorage.setItem(PAYMENT_KEY,  ref);
+    localStorage.setItem(PAYSTACK_KEY, ref);
+    const fresh = resolveAccessMode();
+    setAccess(fresh);
+    setManualRefError("");
+    setShowManualRef(false);
+    setManualRefInput("");
+  }
 
   useEffect(() => {
     // ── Capture ?reference= immediately on mount before React Router strips it
@@ -436,12 +454,62 @@ export default function Analysis() {
         </div>
       )}
       {access.mode === "paid" && (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
-          <CreditCard className="w-5 h-5 text-blue-600 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-blue-800">Paid Access Unlocked</p>
-            <p className="text-xs text-blue-600 mt-0.5 font-mono">{access.ref}</p>
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-blue-50 border border-blue-200">
+          <div className="flex items-center gap-3">
+            <CreditCard className="w-5 h-5 text-blue-600 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-blue-800">Paid Access Unlocked</p>
+              <p className="text-xs text-blue-600 mt-0.5 font-mono">{access.ref}</p>
+            </div>
           </div>
+          <button
+            onClick={() => setShowManualRef((v) => !v)}
+            className="text-xs text-blue-500 hover:text-blue-700 underline underline-offset-2 shrink-0"
+          >
+            Change reference
+          </button>
+        </div>
+      )}
+
+      {/* ── Manual reference entry — shown when locked or when user clicks "Change reference" */}
+      {(access.mode === "locked" || showManualRef) && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <KeyRound className="w-4 h-4 text-amber-600 shrink-0" />
+            <p className="text-sm font-semibold text-amber-800">
+              {access.mode === "locked" ? "Already paid? Enter your transaction reference" : "Update payment reference"}
+            </p>
+          </div>
+          <p className="text-xs text-amber-700">
+            Paste the Paystack reference from your payment confirmation email (e.g. <span className="font-mono">T267136334811364</span>).
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={manualRefInput}
+              onChange={(e) => { setManualRefInput(e.target.value); setManualRefError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && applyManualRef()}
+              placeholder="Paste your reference here…"
+              className="flex-1 text-sm px-3 py-2 rounded-lg border border-amber-300 bg-white focus:outline-none focus:ring-2 focus:ring-amber-400 font-mono placeholder:font-sans placeholder:text-slate-400"
+            />
+            <button
+              onClick={applyManualRef}
+              className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition-colors shrink-0"
+            >
+              Unlock
+            </button>
+          </div>
+          {manualRefError && (
+            <p className="text-xs text-red-600 font-medium">{manualRefError}</p>
+          )}
+          {access.mode === "locked" && (
+            <p className="text-xs text-amber-600">
+              Don't have a reference?{" "}
+              <button onClick={() => navigate("/pricing")} className="underline underline-offset-2 font-medium">
+                View pricing plans
+              </button>
+            </p>
+          )}
         </div>
       )}
 
