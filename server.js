@@ -227,29 +227,35 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
         `SELECT payment_status FROM payments WHERE payment_reference = $1 LIMIT 1`,
         [payRef]
       );
-      const localOk = payCheck.rows.length > 0 && payCheck.rows[0].payment_status === "success";
+      const localRow = payCheck.rows[0];
+      const localOk  = localRow?.payment_status === "success";
+      console.log(`[gate] ref="${payRef}" db_rows=${payCheck.rows.length} db_status="${localRow?.payment_status || "none"}"`);
 
       if (!localOk) {
         // ── Fallback: live verification against Paystack API ──────────────
         const secretKey = process.env.PAYSTACK_SECRET_KEY;
         let paystackVerified = false;
+        let paystackReason   = "PAYSTACK_SECRET_KEY not set";
 
         if (secretKey) {
           try {
-            const verifyRes = await fetch(
-              `https://api.paystack.co/transaction/verify/${encodeURIComponent(payRef)}`,
-              {
-                method: "GET",
-                headers: { Authorization: `Bearer ${secretKey}` },
-              }
-            );
+            const verifyUrl = `https://api.paystack.co/transaction/verify/${encodeURIComponent(payRef)}`;
+            console.log(`[gate] calling Paystack verify: ${verifyUrl}`);
+
+            const verifyRes  = await fetch(verifyUrl, {
+              method: "GET",
+              headers: { Authorization: `Bearer ${secretKey}` },
+            });
             const verifyData = await verifyRes.json();
+
+            // Log the full Paystack response so we can see what's happening
+            console.log(`[gate] Paystack HTTP ${verifyRes.status} — status="${verifyData?.data?.status}" msg="${verifyData?.message}"`);
 
             if (verifyData?.data?.status === "success") {
               paystackVerified = true;
               const { amount, customer, metadata } = verifyData.data;
-              const userId   = metadata?.user_id   || "anonymous";
-              const planName = metadata?.plan_name  || "unknown";
+              const userId   = metadata?.user_id  || "anonymous";
+              const planName = metadata?.plan_name || "unknown";
 
               await db.query(
                 `INSERT INTO payments (user_id, plan_name, amount, payment_reference, payment_status)
@@ -258,21 +264,26 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
                  DO UPDATE SET payment_status = 'success', updated_at = NOW()`,
                 [userId, planName, amount, payRef]
               );
-              console.log(`Paystack live-verified and saved: ${payRef} — ₦${amount / 100} from ${customer?.email}`);
+              console.log(`[gate] Paystack live-verified and saved: ${payRef} — ₦${amount / 100} from ${customer?.email}`);
+            } else {
+              paystackReason = `Paystack returned status="${verifyData?.data?.status}" msg="${verifyData?.message}"`;
             }
           } catch (verifyErr) {
-            console.error("Paystack live verification error:", verifyErr?.message);
+            paystackReason = verifyErr?.message;
+            console.error("[gate] Paystack live verification threw:", verifyErr?.message);
           }
         }
 
         if (!paystackVerified) {
+          console.warn(`[gate] 402 for ref="${payRef}" — reason: ${paystackReason}`);
           return res.status(402).json({
             error: "No confirmed payment found for this reference. Please complete your purchase.",
+            detail: paystackReason,
           });
         }
       }
     } catch (err) {
-      console.error("Access gate DB error:", err?.message);
+      console.error("[gate] DB error:", err?.message);
       return res.status(500).json({ error: "Could not verify payment. Please try again." });
     }
   }
