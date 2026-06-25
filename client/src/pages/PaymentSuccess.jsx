@@ -1,21 +1,43 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { CheckCircle, ArrowRight } from "lucide-react";
+import { CheckCircle, ArrowRight, Loader2 } from "lucide-react";
 
-const PAYMENT_KEY = "bidready_payment_ref";
+const PAYMENT_KEY  = "bidready_payment_ref";
+const PAYSTACK_KEY = "paystack_reference";
 
 export default function PaymentSuccess() {
-  const { state } = useLocation();
-  const navigate = useNavigate();
-  const plan = state?.plan || "Selected Plan";
-  const reference = state?.reference || "";
+  const { state, search } = useLocation();
+  const navigate  = useNavigate();
+  const [verifying, setVerifying] = useState(false);
+  const [verified,  setVerified]  = useState(false);
 
-  // Persist the reference immediately so Analysis.jsx can read it from
-  // localStorage regardless of how the user navigates to that page.
+  // ── Resolve reference from ALL possible sources ──────────────────────────
+  // Priority: URL query params (Paystack redirect) → router state (inline flow)
+  const urlParams  = new URLSearchParams(search);
+  const urlRef     = (urlParams.get("reference") || urlParams.get("trxref") || "").trim();
+  const stateRef   = (state?.reference || "").trim();
+  const reference  = urlRef || stateRef;
+
+  const plan = state?.plan || "Paid Plan";
+
   useEffect(() => {
-    if (reference) {
-      localStorage.setItem(PAYMENT_KEY, reference);
-    }
+    if (!reference) return;
+
+    // Persist immediately to both localStorage keys so Analysis.jsx
+    // finds the reference regardless of which key it checks first.
+    localStorage.setItem(PAYMENT_KEY,  reference);
+    localStorage.setItem(PAYSTACK_KEY, reference);
+
+    // Optionally live-verify with our backend so the DB record is saved
+    // before the user even clicks "Run Analysis".
+    setVerifying(true);
+    fetch(`/api/payment/verify/${encodeURIComponent(reference)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.verified) setVerified(true);
+      })
+      .catch(() => {})
+      .finally(() => setVerifying(false));
   }, [reference]);
 
   return (
@@ -26,13 +48,28 @@ export default function PaymentSuccess() {
         </div>
         <h1 className="text-2xl font-bold text-slate-900">Payment Successful!</h1>
         <p className="text-slate-500 mt-2 text-sm">
-          You're now on the <strong>{plan}</strong>. You have full access to BidReady.
+          You now have full access to BidReady compliance analysis.
         </p>
-        {reference && (
-          <p className="mt-3 text-xs text-slate-400">
-            Reference: <code className="bg-slate-100 px-2 py-0.5 rounded">{reference}</code>
+
+        {reference ? (
+          <div className="mt-3 bg-slate-50 rounded-xl px-4 py-3 text-left">
+            <p className="text-xs text-slate-400 mb-1">Payment Reference</p>
+            <code className="text-xs font-mono text-slate-700 break-all">{reference}</code>
+            {verifying && (
+              <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" /> Confirming payment…
+              </p>
+            )}
+            {verified && (
+              <p className="text-xs text-green-600 mt-1 font-medium">✓ Payment confirmed</p>
+            )}
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+            No reference detected — your access may have already been saved. Try running an analysis.
           </p>
         )}
+
         <div className="mt-6 flex flex-col gap-3">
           <button
             onClick={() => navigate("/analysis")}

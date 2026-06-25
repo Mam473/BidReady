@@ -586,6 +586,57 @@ app.post("/api/payment/webhook", express.raw({ type: "application/json" }), asyn
   res.sendStatus(200);
 });
 
+// ─── Payment: Client-side verify (called by PaymentSuccess page) ───────────
+// Lets the frontend pre-confirm a Paystack reference immediately after redirect
+// so the DB record is ready before the user clicks "Run Analysis".
+app.get("/api/payment/verify/:reference", async (req, res) => {
+  const payRef    = (req.params.reference || "").trim();
+  const secretKey = process.env.PAYSTACK_SECRET_KEY;
+
+  if (!payRef) return res.status(400).json({ verified: false, error: "No reference supplied." });
+
+  try {
+    // 1. Check local DB first
+    const local = await db.query(
+      `SELECT payment_status FROM payments WHERE payment_reference = $1 LIMIT 1`,
+      [payRef]
+    );
+    if (local.rows.length > 0 && local.rows[0].payment_status === "success") {
+      return res.json({ verified: true, source: "db" });
+    }
+
+    // 2. Fallback: live Paystack verification
+    if (!secretKey) return res.json({ verified: false, error: "Paystack key not configured." });
+
+    const paystackRes  = await fetch(
+      `https://api.paystack.co/transaction/verify/${encodeURIComponent(payRef)}`,
+      { headers: { Authorization: `Bearer ${secretKey}` } }
+    );
+    const paystackData = await paystackRes.json();
+
+    if (paystackData?.data?.status === "success") {
+      const { amount, customer, metadata } = paystackData.data;
+      const userId   = metadata?.user_id  || "anonymous";
+      const planName = metadata?.plan_name || "unknown";
+
+      await db.query(
+        `INSERT INTO payments (user_id, plan_name, amount, payment_reference, payment_status)
+         VALUES ($1, $2, $3, $4, 'success')
+         ON CONFLICT (payment_reference)
+         DO UPDATE SET payment_status = 'success', updated_at = NOW()`,
+        [userId, planName, amount, payRef]
+      );
+      console.log(`Pre-verified and saved: ${payRef} — ₦${amount / 100} from ${customer?.email}`);
+      return res.json({ verified: true, source: "paystack" });
+    }
+
+    return res.json({ verified: false, error: "Payment not yet confirmed by Paystack." });
+  } catch (err) {
+    console.error("Verify route error:", err?.message);
+    return res.status(500).json({ verified: false, error: "Verification check failed." });
+  }
+});
+
 // ─── Admin: Stats ──────────────────────────────────────────────────────────
 app.get("/api/admin/stats", async (req, res) => {
   try {
