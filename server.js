@@ -140,9 +140,14 @@ function fastPathMatch(filename, fullText) {
 
 // ─── Status evaluation — two strict rules ─────────────────────────────────
 // RULE 1: Static/capability docs → always MET if present (no expiry check)
-// RULE 2: Regulatory certs → strict date check against 2026-12-31
-function enforceStatusRules(requirements) {
-  const competitionBaseline = new Date("2026-12-31");
+// RULE 2: Regulatory certs → strict date check against the submission deadline
+//         (extracted from the tender document, or BASELINE_DATE as fallback)
+function enforceStatusRules(requirements, baseline) {
+  const competitionBaseline = (baseline instanceof Date && !isNaN(baseline))
+    ? baseline
+    : new Date(BASELINE_STR);
+  const baselineStr = competitionBaseline.toISOString().split("T")[0];
+
   return requirements.map((req) => {
     if (req.status !== "MISSING") {
       const isStatic = ["CAC", "Affidavit", "Financial Capability", "Similar Jobs"].some(
@@ -155,7 +160,7 @@ function enforceStatusRules(requirements) {
         const expDate = new Date(req.expiryDate);
         if (expDate < competitionBaseline) {
           req.status   = "EXPIRED";
-          req.feedback = `CRITICAL VALIDATION FAILURE: This certificate expired on ${req.expiryDate} and is invalid for a submission baseline of 2026-12-31.`;
+          req.feedback = `CRITICAL VALIDATION FAILURE: This certificate expired on ${req.expiryDate} and is invalid for a submission deadline of ${baselineStr}.`;
         } else {
           req.status   = "MET";
           req.feedback = `Validated: Active and compliant until ${req.expiryDate}`;
@@ -374,36 +379,63 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
 
       const prompt = `You are a Nigerian government procurement compliance AI.
 
-VALIDATION BASELINE DATE: ${BASELINE_STR}
 COMPANY: ${companyProfile.name} (RC: ${companyProfile.rcNumber || "N/A"})
 TENDER: ${truncate(tenderName, 100)}
 TENDER EXCERPT: ${truncate(tenderText, 1500)}
 
-━━━ UNRESOLVED DOCUMENT CATEGORIES (classify these only) ━━━
+━━━ STEP 1 — TENDER DOCUMENT IDENTIFICATION & DEADLINE EXTRACTION ━━━
+First, identify the procurement document type and extract the submission deadline from the TENDER EXCERPT and any uploaded document text.
+
+DOCUMENT TYPE — identify one of:
+  • ITT  — Invitation to Tender: look for "Invitation to Tender", "ITT", "Bid Documents", "Tender Notice"
+  • RFQ  — Request for Quotation: look for "Request for Quotation", "RFQ", "Quotation closing date"
+  • EOI  — Expression of Interest: look for "Expression of Interest", "EOI"
+  • TENDER — use as fallback if none of the above match clearly
+
+DEADLINE EXTRACTION — aggressively scan for ALL of these phrases and any date near them:
+  "Submission of Tender closing date"
+  "Bid opening date"
+  "Deadline for submission of Bids"
+  "Tenders must be dropped in the tender box on or before"
+  "Tenders must be submitted by"
+  "Quotations must be received by"
+  "EOI closing date"
+  "Expressions of Interest must be submitted by"
+  "Closing date for submission"
+  "Submission deadline"
+  "Closing date"
+  or ANY date pattern adjacent to a submission/deadline/closing keyword.
+→ If a clear submission deadline is found, extract it as tenderSubmissionDeadline in YYYY-MM-DD format.
+→ This extracted deadline becomes the VALIDATION BASELINE for all certificate expiry checks below.
+→ If no deadline is found, fall back to: ${BASELINE_STR}
+
+━━━ STEP 2 — UNRESOLVED DOCUMENT CATEGORIES (classify these only) ━━━
 ${unresolvedCategories.map((c, i) => `${i + 1}. ${c}`).join("\n")}
 
 ━━━ UPLOADED DOCUMENTS FOR CLASSIFICATION ━━━
 ${docBlock}
 
-━━━ CLASSIFICATION RULES ━━━
-For each unresolved category above, classify the document and set status:
+━━━ STEP 3 — CLASSIFICATION RULES ━━━
+Use the tenderSubmissionDeadline you extracted in Step 1 (or ${BASELINE_STR} if none found) as BASELINE below.
 
 STATIC/CAPABILITY (no expiry check — status is FOUND or MISSING):
 - CAC Registration Documents, Sworn Affidavit, Evidence of Financial Capability, Evidence of Similar Jobs, Company Profile with CVs
 → If a matching document is present: status = "FOUND". If absent: status = "MISSING".
 
-REGULATORY CERTIFICATES (strict expiry extraction — Rule 2):
+REGULATORY CERTIFICATES (strict expiry extraction against BASELINE):
 - Tax Clearance (FIRS), PENCOM, NSITF, ITF, BPP, Audited Financial Accounts
 → Search the ENTIRE document text for any expiry or validity date phrase:
   "valid until", "expiry date", "expires", "valid through", "valid to", "date of expiry",
   or any date pattern (DD/MM/YYYY, YYYY-MM-DD, "31 December 2025", etc.).
-→ If a clearly future date (on or after ${BASELINE_STR}) is found: status = "FOUND", expiryDate = "<YYYY-MM-DD>".
-→ If a date is found but it is BEFORE ${BASELINE_STR}: status = "FOUND", expiryDate = "<YYYY-MM-DD>" (server will mark EXPIRED).
-→ STRICT RULE: If the document name/header is present in the text but NO valid date can be extracted: status = "FOUND", omit expiryDate (server will mark EXPIRED — do NOT assume MET).
+→ If a date on or after BASELINE is found: status = "FOUND", expiryDate = "<YYYY-MM-DD>".
+→ If a date is found but BEFORE BASELINE: status = "FOUND", expiryDate = "<YYYY-MM-DD>" (server will mark EXPIRED).
+→ STRICT RULE: If the document name/header is present but NO valid date can be extracted: status = "FOUND", omit expiryDate (server will mark EXPIRED — do NOT assume MET).
 → If no document at all was uploaded for this category: status = "MISSING", omit expiryDate.
 
 Respond ONLY with valid JSON — no markdown, no extra text:
 {
+  "tenderType": "<ITT|RFQ|EOI|TENDER>",
+  "tenderSubmissionDeadline": "<YYYY-MM-DD or omit if not found>",
   "requirements": [
     {
       "name": "<exact category name from the list above>",
@@ -428,6 +460,21 @@ The "requirements" array must contain exactly ${unresolvedCategories.length} ent
 
       const aiResult = JSON.parse(jsonMatch[0]);
 
+      // ── Resolve effective submission deadline ─────────────────────────────
+      // Use AI-extracted tenderSubmissionDeadline if valid, else fall back to
+      // BASELINE_DATE so regulatory certificate checks are always meaningful.
+      const extractedDeadlineStr = aiResult.tenderSubmissionDeadline || "";
+      const extractedDeadline    = extractedDeadlineStr ? new Date(extractedDeadlineStr) : null;
+      const effectiveBaseline    = (extractedDeadline && !isNaN(extractedDeadline))
+        ? extractedDeadline
+        : BASELINE_DATE;
+      const effectiveBaselineStr = effectiveBaseline.toISOString().split("T")[0];
+
+      const tenderType = aiResult.tenderType || "TENDER";
+      if (extractedDeadlineStr) {
+        console.log(`[analysis] ${tenderType} — submission deadline extracted: ${extractedDeadlineStr} → using as compliance baseline`);
+      }
+
       // Merge AI results into the response buffer
       // Normalise AI's intermediate "FOUND" → "MET" before rule enforcement
       for (const req of (aiResult.requirements || [])) {
@@ -441,8 +488,10 @@ The "requirements" array must contain exactly ${unresolvedCategories.length} ent
 
       // Build final requirements list preserving the canonical order
       // enforceStatusRules applies Rule 1 (static → MET) and Rule 2 (date check)
+      // Pass effectiveBaseline so certs are evaluated against the real tender deadline
       const finalRequirements = enforceStatusRules(
-        ELEVEN_CATEGORIES.map((cat) => responseBuffer[cat])
+        ELEVEN_CATEGORIES.map((cat) => responseBuffer[cat]),
+        effectiveBaseline
       );
 
       // Calculate score: start at 100, apply deductions
@@ -464,6 +513,9 @@ The "requirements" array must contain exactly ${unresolvedCategories.length} ent
         success: true,
         result: {
           score,
+          tenderType,
+          tenderSubmissionDeadline: extractedDeadlineStr || null,
+          complianceBaseline: effectiveBaselineStr,
           summary: `${companyProfile.name} is ${complianceLabel} with ${metCount} of 11 requirements met, ${missingCount} missing and ${expiredCount} expired.`,
           requirements: finalRequirements,
           feedback: aiResult.feedback || "Please address the missing and expired documents before submission.",
