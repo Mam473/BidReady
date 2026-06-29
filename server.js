@@ -395,6 +395,23 @@ COMPANY: ${companyProfile.name} (RC: ${companyProfile.rcNumber || "N/A"})
 TENDER: ${truncate(tenderName, 100)}
 TENDER EXCERPT: ${truncate(tenderText, 1500)}
 
+━━━ STEP 0 — STRUCTURED METADATA EXTRACTION ━━━
+Analyze the TENDER EXCERPT and extract the following 11 fields verbatim from the source text.
+Apply all RULES above: never guess, never summarize, preserve every date/figure/currency/percentage exactly.
+If a field cannot be found anywhere in the text, set its value to "Not Specified".
+
+  procuringEntity      — The full official name of the organisation issuing this tender.
+  tenderTitle          — The exact title of the tender as written in the document.
+  tenderNumber         — The tender/reference/lot number exactly as printed.
+  country              — Country where the procurement takes place.
+  procurementMethod    — e.g. "Open Competitive Bidding", "Selective Tendering", "Request for Quotation".
+  sector               — Industry or sector (e.g. "Construction", "ICT", "Health", "Education").
+  contractType         — e.g. "Lump Sum", "Unit Rate", "Framework Agreement", "Consultancy".
+  submissionDeadline   — Exact submission/closing date, converted to YYYY-MM-DD. Preserve the original date text in notes.
+  closingTime          — Time of day bids must be received by (e.g. "12:00 noon", "16:00 WAT"). "Not Specified" if absent.
+  submissionMethod     — How bids must be delivered (e.g. "Physical submission", "Email", "Online portal").
+  bidValidity          — Number of days or weeks bids remain valid after the closing date (e.g. "90 days", "Not Specified").
+
 ━━━ STEP 1 — TENDER DOCUMENT IDENTIFICATION & DEADLINE EXTRACTION ━━━
 First, identify the procurement document type and extract the submission deadline from the TENDER EXCERPT and any uploaded document text.
 
@@ -446,6 +463,19 @@ REGULATORY CERTIFICATES (strict expiry extraction against BASELINE):
 
 Respond ONLY with valid JSON — no markdown, no extra text:
 {
+  "tenderMetadata": {
+    "procuringEntity": "<verbatim or Not Specified>",
+    "tenderTitle": "<verbatim or Not Specified>",
+    "tenderNumber": "<verbatim or Not Specified>",
+    "country": "<verbatim or Not Specified>",
+    "procurementMethod": "<verbatim or Not Specified>",
+    "sector": "<verbatim or Not Specified>",
+    "contractType": "<verbatim or Not Specified>",
+    "submissionDeadline": "<YYYY-MM-DD or Not Specified>",
+    "closingTime": "<verbatim or Not Specified>",
+    "submissionMethod": "<verbatim or Not Specified>",
+    "bidValidity": "<verbatim or Not Specified>"
+  },
   "tenderType": "<ITT|RFQ|EOI|TENDER>",
   "tenderSubmissionDeadline": "<YYYY-MM-DD or omit if not found>",
   "requirements": [
@@ -528,6 +558,7 @@ The "requirements" array must contain exactly ${unresolvedCategories.length} ent
           tenderType,
           tenderSubmissionDeadline: extractedDeadlineStr || null,
           complianceBaseline: effectiveBaselineStr,
+          tenderMetadata: aiResult.tenderMetadata || null,
           summary: `${companyProfile.name} is ${complianceLabel} with ${metCount} of 11 requirements met, ${missingCount} missing and ${expiredCount} expired.`,
           requirements: finalRequirements,
           feedback: aiResult.feedback || "Please address the missing and expired documents before submission.",
