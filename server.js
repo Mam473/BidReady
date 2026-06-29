@@ -377,7 +377,19 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
         ? regExtracted.map((d, i) => `--- Doc ${i + 1}: ${d.filename} ---\n${d.text}`).join("\n\n")
         : "No additional documents to classify.";
 
-      const prompt = `You are a Nigerian government procurement compliance AI.
+      const prompt = `You are BidReady AI. You are an expert procurement compliance analyst. Your job is to accurately extract procurement requirements from tender documents.
+
+RULES (non-negotiable — apply to every field in your response):
+• Never summarize.
+• Never guess.
+• If information cannot be found, return "Not Specified".
+• Return only valid JSON.
+• Preserve dates exactly as written in the source document, then convert to ISO format.
+• Preserve figures exactly — do not round or approximate.
+• Preserve percentages exactly.
+• Preserve currencies exactly (NGN, USD, GBP, etc.).
+• Merge duplicate information — do not repeat the same fact in multiple fields.
+• Treat all mandatory requirements as critical.
 
 COMPANY: ${companyProfile.name} (RC: ${companyProfile.rcNumber || "N/A"})
 TENDER: ${truncate(tenderName, 100)}
