@@ -430,6 +430,17 @@ If a category has no items found in the text, return an empty array for it.
   financialRequirements  — All financial thresholds: minimum turnover, working capital, bank references, annual revenue, etc.
   equipmentRequirements  — All plant, machinery, tools, vehicles, or technical equipment the bidder must own or have access to.
 
+Also extract the following 8 evaluation and risk categories. Preserve the EXACT wording — never paraphrase, never infer.
+If a category has no items found in the text, return an empty array for it.
+
+  administrativeEvaluation   — All administrative/pass-fail checklist items used to screen bids before technical review.
+  technicalEvaluation        — All technical scoring criteria, sub-criteria, and their allocated weights or marks.
+  financialEvaluation        — All financial scoring criteria, price weighting methodology, or financial capacity checks.
+  passMark                   — The minimum score or threshold a bidder must achieve to pass each stage (administrative, technical, financial).
+  weightedScores             — Full breakdown of percentage weights allocated across evaluation stages (e.g. Technical 70%, Financial 30%).
+  disqualificationRisks      — Any condition explicitly stated as grounds for automatic disqualification or rejection of a bid.
+  importantDates             — All dates and deadlines in the document: site visits, pre-bid meetings, clarification deadlines, submission, opening, award. Preserve exact wording and convert each to YYYY-MM-DD.
+
 ━━━ STEP 1 — TENDER DOCUMENT IDENTIFICATION & DEADLINE EXTRACTION ━━━
 First, identify the procurement document type and extract the submission deadline from the TENDER EXCERPT and any uploaded document text.
 
@@ -506,6 +517,15 @@ Respond ONLY with valid JSON — no markdown, no extra text:
     "experienceRequirements": [{ "name": "<verbatim wording>", "mandatory": true, "section": "<clause or Not Specified>" }],
     "financialRequirements":  [{ "name": "<verbatim wording>", "mandatory": true, "section": "<clause or Not Specified>" }],
     "equipmentRequirements":  [{ "name": "<verbatim wording>", "mandatory": true, "section": "<clause or Not Specified>" }]
+  },
+  "evaluationCriteria": {
+    "administrativeEvaluation": [{ "name": "<verbatim>", "section": "<clause or Not Specified>" }],
+    "technicalEvaluation":      [{ "name": "<verbatim>", "weight": "<marks or % or Not Specified>", "section": "<clause or Not Specified>" }],
+    "financialEvaluation":      [{ "name": "<verbatim>", "weight": "<marks or % or Not Specified>", "section": "<clause or Not Specified>" }],
+    "passMark":                 [{ "name": "<verbatim pass/threshold statement>", "section": "<clause or Not Specified>" }],
+    "weightedScores":           [{ "name": "<verbatim weight description>", "weight": "<% or score>", "section": "<clause or Not Specified>" }],
+    "disqualificationRisks":    [{ "name": "<verbatim disqualification condition>", "section": "<clause or Not Specified>" }],
+    "importantDates":           [{ "name": "<verbatim event description>", "date": "<YYYY-MM-DD or Not Specified>", "section": "<clause or Not Specified>" }]
   },
   "tenderType": "<ITT|RFQ|EOI|TENDER>",
   "tenderSubmissionDeadline": "<YYYY-MM-DD or omit if not found>",
@@ -592,6 +612,7 @@ The "requirements" array must contain exactly ${unresolvedCategories.length} ent
           tenderMetadata: aiResult.tenderMetadata || null,
           tenderRequirements: aiResult.tenderRequirements || null,
           qualificationRequirements: aiResult.qualificationRequirements || null,
+          evaluationCriteria: aiResult.evaluationCriteria || null,
           summary: `${companyProfile.name} is ${complianceLabel} with ${metCount} of 11 requirements met, ${missingCount} missing and ${expiredCount} expired.`,
           requirements: finalRequirements,
           feedback: aiResult.feedback || "Please address the missing and expired documents before submission.",
