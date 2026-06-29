@@ -422,6 +422,14 @@ If a category has no items, return an empty array for it.
   mandatoryRegistrations       — All registrations with regulatory bodies or professional associations required.
   bidSecurityRequirements      — Bid bond / bid security / earnest money deposit details — amount, currency, percentage, and acceptable form.
 
+Also extract the following 4 qualification categories. Preserve the EXACT wording from the document — do not paraphrase, summarise, or infer.
+If a category has no items found in the text, return an empty array for it.
+
+  personnelRequirements  — All key personnel, staffing levels, professional roles or competency requirements stated.
+  experienceRequirements — All past project experience, years of operation, or similar-works requirements stated.
+  financialRequirements  — All financial thresholds: minimum turnover, working capital, bank references, annual revenue, etc.
+  equipmentRequirements  — All plant, machinery, tools, vehicles, or technical equipment the bidder must own or have access to.
+
 ━━━ STEP 1 — TENDER DOCUMENT IDENTIFICATION & DEADLINE EXTRACTION ━━━
 First, identify the procurement document type and extract the submission deadline from the TENDER EXCERPT and any uploaded document text.
 
@@ -492,6 +500,12 @@ Respond ONLY with valid JSON — no markdown, no extra text:
     "mandatoryCertificates":   [{ "name": "<verbatim>", "mandatory": true, "section": "<clause or Not Specified>" }],
     "mandatoryRegistrations":  [{ "name": "<verbatim>", "mandatory": true, "section": "<clause or Not Specified>" }],
     "bidSecurityRequirements": [{ "name": "<verbatim description>", "mandatory": true, "section": "<clause or Not Specified>" }]
+  },
+  "qualificationRequirements": {
+    "personnelRequirements":  [{ "name": "<verbatim wording>", "mandatory": true, "section": "<clause or Not Specified>" }],
+    "experienceRequirements": [{ "name": "<verbatim wording>", "mandatory": true, "section": "<clause or Not Specified>" }],
+    "financialRequirements":  [{ "name": "<verbatim wording>", "mandatory": true, "section": "<clause or Not Specified>" }],
+    "equipmentRequirements":  [{ "name": "<verbatim wording>", "mandatory": true, "section": "<clause or Not Specified>" }]
   },
   "tenderType": "<ITT|RFQ|EOI|TENDER>",
   "tenderSubmissionDeadline": "<YYYY-MM-DD or omit if not found>",
@@ -577,6 +591,7 @@ The "requirements" array must contain exactly ${unresolvedCategories.length} ent
           complianceBaseline: effectiveBaselineStr,
           tenderMetadata: aiResult.tenderMetadata || null,
           tenderRequirements: aiResult.tenderRequirements || null,
+          qualificationRequirements: aiResult.qualificationRequirements || null,
           summary: `${companyProfile.name} is ${complianceLabel} with ${metCount} of 11 requirements met, ${missingCount} missing and ${expiredCount} expired.`,
           requirements: finalRequirements,
           feedback: aiResult.feedback || "Please address the missing and expired documents before submission.",
