@@ -412,6 +412,16 @@ If a field cannot be found anywhere in the text, set its value to "Not Specified
   submissionMethod     — How bids must be delivered (e.g. "Physical submission", "Email", "Online portal").
   bidValidity          — Number of days or weeks bids remain valid after the closing date (e.g. "90 days", "Not Specified").
 
+Also extract the following 5 requirement categories from the TENDER EXCERPT.
+For each item found, capture: name (verbatim), mandatory (true if explicitly required, false if optional), section (heading or clause reference where it appears, or "Not Specified").
+If a category has no items, return an empty array for it.
+
+  requiredDocuments            — All documents the bidder must submit with their bid package.
+  eligibilityRequirements      — All mandatory eligibility or qualification criteria (turnover, experience, staff strength, etc.).
+  mandatoryCertificates        — All certificates explicitly required (CAC, FIRS, PENCOM, NSITF, ITF, BPP, etc.).
+  mandatoryRegistrations       — All registrations with regulatory bodies or professional associations required.
+  bidSecurityRequirements      — Bid bond / bid security / earnest money deposit details — amount, currency, percentage, and acceptable form.
+
 ━━━ STEP 1 — TENDER DOCUMENT IDENTIFICATION & DEADLINE EXTRACTION ━━━
 First, identify the procurement document type and extract the submission deadline from the TENDER EXCERPT and any uploaded document text.
 
@@ -475,6 +485,13 @@ Respond ONLY with valid JSON — no markdown, no extra text:
     "closingTime": "<verbatim or Not Specified>",
     "submissionMethod": "<verbatim or Not Specified>",
     "bidValidity": "<verbatim or Not Specified>"
+  },
+  "tenderRequirements": {
+    "requiredDocuments":       [{ "name": "<verbatim>", "mandatory": true, "section": "<clause or Not Specified>" }],
+    "eligibilityRequirements": [{ "name": "<verbatim>", "mandatory": true, "section": "<clause or Not Specified>" }],
+    "mandatoryCertificates":   [{ "name": "<verbatim>", "mandatory": true, "section": "<clause or Not Specified>" }],
+    "mandatoryRegistrations":  [{ "name": "<verbatim>", "mandatory": true, "section": "<clause or Not Specified>" }],
+    "bidSecurityRequirements": [{ "name": "<verbatim description>", "mandatory": true, "section": "<clause or Not Specified>" }]
   },
   "tenderType": "<ITT|RFQ|EOI|TENDER>",
   "tenderSubmissionDeadline": "<YYYY-MM-DD or omit if not found>",
@@ -559,6 +576,7 @@ The "requirements" array must contain exactly ${unresolvedCategories.length} ent
           tenderSubmissionDeadline: extractedDeadlineStr || null,
           complianceBaseline: effectiveBaselineStr,
           tenderMetadata: aiResult.tenderMetadata || null,
+          tenderRequirements: aiResult.tenderRequirements || null,
           summary: `${companyProfile.name} is ${complianceLabel} with ${metCount} of 11 requirements met, ${missingCount} missing and ${expiredCount} expired.`,
           requirements: finalRequirements,
           feedback: aiResult.feedback || "Please address the missing and expired documents before submission.",
