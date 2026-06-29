@@ -899,6 +899,174 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+// ─── Tender Document Analyzer ──────────────────────────────────────────────
+// POST /api/tender/extract
+// Accepts a single PDF or DOCX tender document, extracts all structured
+// intelligence in one Gemini call, saves to DB, returns the full object.
+app.post(
+  "/api/tender/extract",
+  upload.single("tenderDoc"),
+  async (req, res) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "GEMINI_API_KEY not configured." });
+
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: "No file uploaded. Send a PDF or DOCX as 'tenderDoc'." });
+
+    const companyName = (req.body.companyName || "Unknown Company").trim();
+
+    // ── Extract text from PDF or DOCX ──────────────────────────────────────
+    let rawText = "";
+    try {
+      const mime = file.mimetype;
+      const name = file.originalname.toLowerCase();
+      if (mime === "application/pdf" || name.endsWith(".pdf")) {
+        const parsed = await pdfParse(file.buffer);
+        rawText = parsed.text || "";
+      } else if (
+        mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+        name.endsWith(".docx")
+      ) {
+        const result = await mammoth.extractRawText({ buffer: file.buffer });
+        rawText = result.value || "";
+      } else {
+        return res.status(400).json({ error: "Unsupported file type. Upload a PDF or DOCX." });
+      }
+    } catch (parseErr) {
+      console.error("[tender/extract] parse error:", parseErr.message);
+      return res.status(422).json({ error: "Could not read the document. Ensure the file is not password-protected." });
+    }
+
+    if (!rawText.trim()) {
+      return res.status(422).json({ error: "No readable text found in the document. It may be a scanned image PDF." });
+    }
+
+    // Cap text to avoid token overflows — 12 000 chars covers most ITT/RFQ docs
+    const MAX_CHARS = 12000;
+    const docText = rawText.length > MAX_CHARS ? rawText.slice(0, MAX_CHARS) + "\n…[truncated]" : rawText;
+    const tenderName = file.originalname.replace(/\.[^.]+$/, "");
+
+    // ── Single Gemini extraction call ───────────────────────────────────────
+    const prompt = `You are BidReady AI. You are an expert procurement compliance analyst. Your job is to accurately extract procurement requirements from tender documents.
+
+RULES (non-negotiable):
+• Never summarize. Never guess. Never paraphrase.
+• If a field cannot be found, use "Not Specified".
+• Return only valid JSON — no markdown, no code fences, no extra text.
+• Preserve dates exactly as written, then convert to ISO YYYY-MM-DD.
+• Preserve all figures, percentages, and currencies exactly.
+• Treat all mandatory requirements as critical.
+
+DOCUMENT TEXT:
+${docText}
+
+Extract and return the following JSON object:
+{
+  "tenderInfo": {
+    "procuringEntity": "verbatim or Not Specified",
+    "tenderTitle": "verbatim or Not Specified",
+    "tenderNumber": "verbatim or Not Specified",
+    "country": "verbatim or Not Specified",
+    "procurementMethod": "verbatim or Not Specified",
+    "sector": "verbatim or Not Specified",
+    "contractType": "verbatim or Not Specified",
+    "tenderType": "ITT | RFQ | EOI | TENDER"
+  },
+  "submissionDetails": {
+    "submissionDeadline": "YYYY-MM-DD or Not Specified",
+    "closingTime": "verbatim or Not Specified",
+    "submissionMethod": "verbatim or Not Specified",
+    "bidValidity": "verbatim or Not Specified",
+    "submissionAddress": "verbatim or Not Specified"
+  },
+  "requiredDocuments": [
+    { "name": "verbatim", "mandatory": true, "section": "clause or Not Specified" }
+  ],
+  "eligibilityRequirements": [
+    { "name": "verbatim", "mandatory": true, "section": "clause or Not Specified" }
+  ],
+  "personnelRequirements": [
+    { "name": "verbatim", "mandatory": true, "section": "clause or Not Specified" }
+  ],
+  "financialRequirements": [
+    { "name": "verbatim", "mandatory": true, "section": "clause or Not Specified" }
+  ],
+  "equipmentRequirements": [
+    { "name": "verbatim", "mandatory": true, "section": "clause or Not Specified" }
+  ],
+  "bidSecurity": [
+    { "name": "verbatim description of amount/form/percentage", "mandatory": true, "section": "clause or Not Specified" }
+  ],
+  "evaluationCriteria": {
+    "administrativeEvaluation": [{ "name": "verbatim", "section": "clause or Not Specified" }],
+    "technicalEvaluation":      [{ "name": "verbatim", "weight": "% or marks or Not Specified", "section": "clause or Not Specified" }],
+    "financialEvaluation":      [{ "name": "verbatim", "weight": "% or marks or Not Specified", "section": "clause or Not Specified" }],
+    "passMark":                 [{ "name": "verbatim pass/threshold statement", "section": "clause or Not Specified" }],
+    "weightedScores":           [{ "name": "verbatim", "weight": "% or score", "section": "clause or Not Specified" }]
+  },
+  "importantDates": [
+    { "event": "verbatim event name", "date": "YYYY-MM-DD or Not Specified", "time": "verbatim or Not Specified", "section": "clause or Not Specified" }
+  ],
+  "disqualificationRisks": [
+    { "name": "verbatim disqualification condition", "section": "clause or Not Specified" }
+  ]
+}`;
+
+    let analysis;
+    try {
+      const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1" } });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-lite",
+        contents: prompt,
+      });
+      const raw = response.text.trim();
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("Gemini did not return valid JSON. Raw: " + truncate(raw, 300));
+      analysis = JSON.parse(jsonMatch[0]);
+    } catch (aiErr) {
+      console.error("[tender/extract] AI error:", aiErr.message);
+      return res.status(500).json({ error: "AI extraction failed: " + aiErr.message });
+    }
+
+    // ── Save to database ────────────────────────────────────────────────────
+    try {
+      await db.query(
+        `INSERT INTO tender_analyses (tender_name, company_name, analysis) VALUES ($1, $2, $3)`,
+        [tenderName, companyName, JSON.stringify(analysis)]
+      );
+    } catch (dbErr) {
+      console.warn("[tender/extract] DB save failed (non-fatal):", dbErr.message);
+    }
+
+    console.log(`[tender/extract] ${tenderName} — ${analysis.tenderInfo?.tenderType || "TENDER"} extracted for ${companyName}`);
+
+    return res.json({
+      success: true,
+      tenderName,
+      fileName: file.originalname,
+      analysis,
+    });
+  }
+);
+
+// GET /api/tender/analyses — list saved analyses for a company
+app.get("/api/tender/analyses", async (req, res) => {
+  const companyName = (req.query.company || "").trim();
+  try {
+    const rows = companyName
+      ? await db.query(
+          `SELECT id, tender_name, company_name, created_at FROM tender_analyses WHERE company_name = $1 ORDER BY created_at DESC LIMIT 20`,
+          [companyName]
+        )
+      : await db.query(
+          `SELECT id, tender_name, company_name, created_at FROM tender_analyses ORDER BY created_at DESC LIMIT 20`
+        );
+    res.json({ success: true, analyses: rows.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 function startServer(port, attempt = 1) {
   const server = app.listen(port, "0.0.0.0", () => {
     console.log(`BidReady API running on http://0.0.0.0:${port}`);

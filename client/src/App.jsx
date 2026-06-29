@@ -5,6 +5,7 @@ import Onboarding from "./pages/Onboarding.jsx";
 import Documents from "./pages/Documents.jsx";
 import Tenders from "./pages/Tenders.jsx";
 import Analysis from "./pages/Analysis.jsx";
+import TenderAnalyzer from "./pages/TenderAnalyzer.jsx";
 import Pricing from "./pages/Pricing.jsx";
 import PaymentSuccess from "./pages/PaymentSuccess.jsx";
 import Admin from "./pages/Admin.jsx";
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="documents" element={<Documents />} />
           <Route path="tenders" element={<Tenders />} />
           <Route path="analysis" element={<Analysis />} />
+          <Route path="tender-analyzer" element={<TenderAnalyzer />} />
           <Route path="pricing" element={<Pricing />} />
           <Route path="admin" element={<Admin />} />
         </Route>
