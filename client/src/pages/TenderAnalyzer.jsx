@@ -170,13 +170,19 @@ export default function TenderAnalyzer() {
     catch { return {}; }
   })();
 
+  const ACCEPTED_MIMES = new Set([
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "image/jpeg",
+    "image/png",
+  ]);
+  const ACCEPTED_EXTS = /\.(pdf|doc|docx|jpg|jpeg|png)$/i;
+
   function pickFile(f) {
     if (!f) return;
-    const ok = f.type === "application/pdf" ||
-      f.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      f.name.toLowerCase().endsWith(".pdf") ||
-      f.name.toLowerCase().endsWith(".docx");
-    if (!ok) { setError("Only PDF and DOCX files are accepted."); return; }
+    const ok = ACCEPTED_MIMES.has(f.type) || ACCEPTED_EXTS.test(f.name);
+    if (!ok) { setError("Unsupported file type. Please upload PDF, DOC, DOCX, JPG, JPEG, or PNG."); return; }
     setFile(f);
     setError(null);
     setResult(null);
@@ -262,7 +268,7 @@ export default function TenderAnalyzer() {
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png"
             className="hidden"
             onChange={(e) => pickFile(e.target.files?.[0])}
           />
@@ -273,7 +279,10 @@ export default function TenderAnalyzer() {
                 <Upload className="w-7 h-7 text-brand-500" />
               </div>
               <p className="font-semibold text-slate-700">Drop your tender document here</p>
-              <p className="text-sm text-slate-400 mt-1">PDF or DOCX — ITT, RFQ, EOI supported</p>
+              <p className="text-sm text-slate-400 mt-1">ITT, RFQ, EOI — all tender document types supported</p>
+              <p className="text-xs text-slate-400 font-medium mt-2">
+                Supported formats: <span className="text-brand-500 font-semibold">PDF • DOC • DOCX • JPG • JPEG • PNG</span>
+              </p>
               <button
                 onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
                 className="mt-4 btn-primary text-sm"

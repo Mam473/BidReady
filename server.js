@@ -108,12 +108,27 @@ const FAST_PATH_MATCHERS = [
 // ── FULL PDF EXTRACTOR ─────────────────────────────────────────────────────
 // Reads EVERY page with no page-count limit. Awaits parse completion in full
 // before returning so no trailing pages are dropped from the text string.
-async function extractFullText(buffer) {
+async function extractFullText(buffer, mimeType = "", originalName = "") {
+  const ext = (originalName.match(/\.([^.]+)$/) || [])[1]?.toLowerCase() || "";
   try {
-    const data = await pdfParse(buffer); // no max — all pages, fully awaited
-    return data.text.replace(/\s+/g, " ").trim();
+    // PDF
+    if (mimeType === "application/pdf" || ext === "pdf") {
+      const data = await pdfParse(buffer);
+      return data.text.replace(/\s+/g, " ").trim();
+    }
+    // DOCX
+    if (
+      mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      ext === "docx"
+    ) {
+      const result = await mammoth.extractRawText({ buffer });
+      return (result.value || "").replace(/\s+/g, " ").trim();
+    }
+    // DOC / JPG / JPEG / PNG — text extraction not supported;
+    // filename-based fast-path matching handles these documents
+    return "";
   } catch (err) {
-    console.warn("PDF parse warning:", err?.message);
+    console.warn(`Text extraction warning (${originalName}):`, err?.message);
     return "";
   }
 }
@@ -335,7 +350,7 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
     // to finish parsing before any result is used downstream.
     const scanned = await Promise.all(
       files.map(async (file) => {
-        const fullText = await extractFullText(file.buffer);
+        const fullText = await extractFullText(file.buffer, file.mimetype, file.originalname);
         return { file, fullText };
       })
     );

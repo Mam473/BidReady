@@ -167,12 +167,26 @@ export default function Analysis() {
 
   // Every new drop/selection completely replaces the file list and wipes
   // any previous analysis result so no stale data leaks into the next run.
+  const ACCEPTED_MIMES = new Set([
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "image/jpeg",
+    "image/png",
+  ]);
+  const ACCEPTED_EXTS = /\.(pdf|doc|docx|jpg|jpeg|png)$/i;
+
+  function isAcceptedFile(f) {
+    return ACCEPTED_MIMES.has(f.type) || ACCEPTED_EXTS.test(f.name);
+  }
+
   function addFiles(newFiles) {
-    const pdfs = Array.from(newFiles).filter((f) => f.type === "application/pdf");
-    if (pdfs.length === 0) {
-      setError("Only PDF files are accepted. Please upload PDF documents.");
+    const accepted = Array.from(newFiles).filter(isAcceptedFile);
+    if (accepted.length === 0) {
+      setError("Unsupported file type. Please upload PDF, DOC, DOCX, JPG, JPEG, or PNG files.");
       return;
     }
+    const pdfs = accepted;
     // Hard-reset: discard old file references and any prior requirements state
     setResult(null);
     setError(null);
@@ -619,7 +633,7 @@ export default function Analysis() {
           <input
             ref={fileRef}
             type="file"
-            accept="application/pdf"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png"
             multiple
             className="hidden"
             onChange={(e) => {
@@ -631,14 +645,16 @@ export default function Analysis() {
           </div>
           <p className="font-bold text-slate-700 text-base">Drag & Drop Your File Bundle Here</p>
           <p className="text-sm text-slate-400 mt-1.5 max-w-md mx-auto">
-            Select all your compliance PDFs at once — BidReady AI will automatically identify and classify all 11 document categories
+            Select all your compliance documents at once — BidReady AI will automatically identify and classify all 11 document categories
           </p>
           <div className="flex flex-wrap justify-center gap-1.5 mt-4">
             {ELEVEN_CATEGORIES.map((cat) => (
               <span key={cat} className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{cat}</span>
             ))}
           </div>
-          <p className="text-xs text-brand-500 font-semibold mt-4">Click to browse or drag & drop · PDF files only</p>
+          <p className="text-xs text-slate-400 font-medium mt-4">
+            Supported formats: <span className="text-brand-500 font-semibold">PDF • DOC • DOCX • JPG • JPEG • PNG</span>
+          </p>
         </div>
         )}
 
