@@ -33,8 +33,8 @@ export default function App() {
           <Route index element={<Navigate to="/documents" replace />} />
           <Route path="documents" element={<Documents />} />
           <Route path="tenders" element={<Tenders />} />
-          <Route path="analysis" element={<Analysis />} />
           <Route path="tender-analyzer" element={<TenderAnalyzer />} />
+          <Route path="analysis" element={<Analysis />} />
           <Route path="pricing" element={<Pricing />} />
           <Route path="admin" element={<Admin />} />
         </Route>
