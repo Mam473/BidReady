@@ -174,16 +174,11 @@ export default function Analysis() {
     "image/jpeg",
     "image/png",
   ]);
-  const ACCEPTED_EXTS = /\.(pdf|doc|docx|jpg|jpeg|png)$/i;
-
-  function isAcceptedFile(f) {
-    return ACCEPTED_MIMES.has(f.type) || ACCEPTED_EXTS.test(f.name);
-  }
 
   function addFiles(newFiles) {
-    const accepted = Array.from(newFiles).filter(isAcceptedFile);
+    const accepted = Array.from(newFiles).filter((f) => ACCEPTED_MIMES.has(f.type));
     if (accepted.length === 0) {
-      setError("Unsupported file type. Please upload PDF, DOC, DOCX, JPG, JPEG, or PNG files.");
+      setError("Unsupported file type. Please upload a PDF, DOC, DOCX, JPG, or PNG file.");
       return;
     }
     const pdfs = accepted;
@@ -633,7 +628,7 @@ export default function Analysis() {
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png"
+            accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png"
             multiple
             className="hidden"
             onChange={(e) => {

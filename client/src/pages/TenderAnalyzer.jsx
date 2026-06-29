@@ -177,12 +177,13 @@ export default function TenderAnalyzer() {
     "image/jpeg",
     "image/png",
   ]);
-  const ACCEPTED_EXTS = /\.(pdf|doc|docx|jpg|jpeg|png)$/i;
 
   function pickFile(f) {
     if (!f) return;
-    const ok = ACCEPTED_MIMES.has(f.type) || ACCEPTED_EXTS.test(f.name);
-    if (!ok) { setError("Unsupported file type. Please upload PDF, DOC, DOCX, JPG, JPEG, or PNG."); return; }
+    if (!ACCEPTED_MIMES.has(f.type)) {
+      setError("Unsupported file type. Please upload a PDF, DOC, DOCX, JPG, or PNG file.");
+      return;
+    }
     setFile(f);
     setError(null);
     setResult(null);
@@ -268,7 +269,7 @@ export default function TenderAnalyzer() {
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png"
+            accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png"
             className="hidden"
             onChange={(e) => pickFile(e.target.files?.[0])}
           />
