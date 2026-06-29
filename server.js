@@ -108,13 +108,30 @@ const FAST_PATH_MATCHERS = [
 // ── FULL PDF EXTRACTOR ─────────────────────────────────────────────────────
 // Reads EVERY page with no page-count limit. Awaits parse completion in full
 // before returning so no trailing pages are dropped from the text string.
+// ── cleanPdfText ───────────────────────────────────────────────────────────
+// Preserves document structure (section headings, clause numbers, paragraph
+// breaks) while stripping artefacts that pdf-parse inserts:
+//   • Collapses runs of spaces/tabs within a line → single space
+//   • Preserves single and double newlines (paragraphs / section breaks)
+//   • Collapses 3+ consecutive blank lines → one blank line
+//   • Removes null bytes and other control characters
+function cleanPdfText(raw) {
+  return raw
+    .replace(/\x00/g, "")                      // null bytes
+    .replace(/[^\S\n]+/g, " ")                  // horizontal whitespace → single space
+    .replace(/\n{3,}/g, "\n\n")                 // 3+ blank lines → one blank line
+    .trim();
+}
+
 async function extractFullText(buffer, mimeType = "", originalName = "") {
   const ext = (originalName.match(/\.([^.]+)$/) || [])[1]?.toLowerCase() || "";
   try {
-    // PDF
+    // PDF — extract all pages, preserve structure
     if (mimeType === "application/pdf" || ext === "pdf") {
       const data = await pdfParse(buffer);
-      return data.text.replace(/\s+/g, " ").trim();
+      const cleaned = cleanPdfText(data.text || "");
+      console.log(`[extract] PDF "${originalName}" — ${data.numpages} page(s), ${cleaned.length} chars extracted`);
+      return cleaned;
     }
     // DOCX
     if (
@@ -122,7 +139,9 @@ async function extractFullText(buffer, mimeType = "", originalName = "") {
       ext === "docx"
     ) {
       const result = await mammoth.extractRawText({ buffer });
-      return (result.value || "").replace(/\s+/g, " ").trim();
+      const cleaned = cleanPdfText(result.value || "");
+      console.log(`[extract] DOCX "${originalName}" — ${cleaned.length} chars extracted`);
+      return cleaned;
     }
     // DOC / JPG / JPEG / PNG — text extraction not supported;
     // filename-based fast-path matching handles these documents
@@ -956,9 +975,16 @@ app.post(
       return res.status(422).json({ error: "No readable text found in the document. It may be a scanned image PDF." });
     }
 
-    // Cap text to avoid token overflows — 12 000 chars covers most ITT/RFQ docs
-    const MAX_CHARS = 12000;
-    const docText = rawText.length > MAX_CHARS ? rawText.slice(0, MAX_CHARS) + "\n…[truncated]" : rawText;
+    // Clean and structure the extracted text
+    const structuredText = cleanPdfText(rawText);
+
+    // Cap at 25 000 chars — covers full-length ITT/RFQ/EOI documents while
+    // staying within Gemini's practical context window for a single call
+    const MAX_CHARS = 25000;
+    const docText = structuredText.length > MAX_CHARS
+      ? structuredText.slice(0, MAX_CHARS) + "\n…[document truncated at 25 000 chars]"
+      : structuredText;
+    console.log(`[tender/extract] "${file.originalname}" — ${structuredText.length} chars (${docText.length === structuredText.length ? "full" : "truncated"})`);
     const tenderName = file.originalname.replace(/\.[^.]+$/, "");
 
     // ── Single Gemini extraction call ───────────────────────────────────────
