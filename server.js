@@ -4,6 +4,7 @@ import crypto from "crypto";
 import pg from "pg";
 import multer from "multer";
 import pdfParse from "pdf-parse";
+import mammoth from "mammoth";
 import { GoogleGenAI } from "@google/genai";
 
 const { Pool } = pg;
@@ -19,6 +20,17 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 
 // ─── Schema bootstrap — idempotent, runs once on every startup ─────────────
 async function initSchema() {
   try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS tender_analyses (
+        id            SERIAL PRIMARY KEY,
+        tender_name   TEXT        NOT NULL,
+        company_name  TEXT        NOT NULL,
+        analysis      JSONB       NOT NULL,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_tender_analyses_company
+        ON tender_analyses (company_name);
+    `);
     await db.query(`
       CREATE TABLE IF NOT EXISTS payments (
         id                SERIAL PRIMARY KEY,
