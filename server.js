@@ -1,11 +1,18 @@
 import express from "express";
 import cors from "cors";
 import crypto from "crypto";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import pg from "pg";
 import multer from "multer";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 import { GoogleGenAI } from "@google/genai";
+
+const execFileAsync = promisify(execFile);
 
 const { Pool } = pg;
 const app = express();
@@ -933,6 +940,72 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+// ─── Scanned-PDF OCR via pdftoppm + Gemini Vision ─────────────────────────
+// Renders each page to PNG at 150 DPI (no system install needed — pdftoppm
+// is already on PATH in the Replit NixOS environment), then sends each image
+// to Gemini Vision in parallel. Returns the merged OCR text.
+// Max 15 pages to keep latency and cost reasonable for tender documents.
+const OCR_MAX_PAGES    = 15;
+const OCR_DPI          = "150";
+const OCR_TEXT_THRESHOLD = 200; // chars — below this we treat the PDF as scanned
+
+async function ocrPdfWithGemini(buffer, apiKey, originalName) {
+  const id      = crypto.randomBytes(8).toString("hex");
+  const tmpPdf  = path.join(os.tmpdir(), `br_${id}.pdf`);
+  const imgPfx  = path.join(os.tmpdir(), `br_${id}_pg`);
+
+  try {
+    // Write PDF buffer to a temp file so pdftoppm can read it
+    fs.writeFileSync(tmpPdf, buffer);
+
+    // Render pages → PNG  (-l caps at OCR_MAX_PAGES, -r sets DPI)
+    await execFileAsync("pdftoppm", [
+      "-png", "-r", OCR_DPI, "-l", String(OCR_MAX_PAGES), tmpPdf, imgPfx,
+    ]);
+
+    // Collect generated page images (sorted numerically)
+    const pageFiles = fs
+      .readdirSync(os.tmpdir())
+      .filter((f) => f.startsWith(`br_${id}_pg`) && f.endsWith(".png"))
+      .sort()
+      .map((f) => path.join(os.tmpdir(), f));
+
+    if (pageFiles.length === 0) throw new Error("pdftoppm produced no images");
+
+    console.log(`[ocr] "${originalName}" — ${pageFiles.length} page(s) rendered at ${OCR_DPI} DPI`);
+
+    // Send all page images to Gemini Vision in parallel
+    const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "v1" } });
+    const pageTexts = await Promise.all(
+      pageFiles.map(async (imgPath, idx) => {
+        const imgB64 = fs.readFileSync(imgPath).toString("base64");
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash-lite",
+          contents: [{
+            parts: [
+              {
+                text: "Extract every word of text visible in this document page image. Preserve line breaks and the original layout exactly. Output only the extracted text — no commentary, no markdown.",
+              },
+              { inlineData: { mimeType: "image/png", data: imgB64 } },
+            ],
+          }],
+        });
+        console.log(`[ocr] page ${idx + 1}/${pageFiles.length} extracted`);
+        return response.text.trim();
+      })
+    );
+
+    return pageTexts.join("\n\n");
+  } finally {
+    // Always clean up temp files
+    for (const f of [tmpPdf, ...fs.readdirSync(os.tmpdir())
+      .filter((f) => f.startsWith(`br_${id}`))
+      .map((f) => path.join(os.tmpdir(), f))]) {
+      try { fs.unlinkSync(f); } catch {}
+    }
+  }
+}
+
 // ─── Tender Document Analyzer ──────────────────────────────────────────────
 // POST /api/tender/extract
 // Accepts a single PDF or DOCX tender document, extracts all structured
@@ -951,12 +1024,24 @@ app.post(
 
     // ── Extract text from PDF or DOCX ──────────────────────────────────────
     let rawText = "";
+    let usedOcr = false;
     try {
       const mime = file.mimetype;
       const name = file.originalname.toLowerCase();
       if (mime === "application/pdf" || name.endsWith(".pdf")) {
         const parsed = await pdfParse(file.buffer);
-        rawText = parsed.text || "";
+        const textLayer = cleanPdfText(parsed.text || "");
+        console.log(`[tender/extract] PDF text layer: ${textLayer.length} chars`);
+
+        if (textLayer.length >= OCR_TEXT_THRESHOLD) {
+          // Searchable PDF — use the text layer directly
+          rawText = textLayer;
+        } else {
+          // Sparse or no text layer — scanned PDF detected, run OCR automatically
+          console.log(`[tender/extract] Scanned PDF detected (${textLayer.length} chars < ${OCR_TEXT_THRESHOLD} threshold) — running OCR on "${file.originalname}"`);
+          rawText = await ocrPdfWithGemini(file.buffer, apiKey, file.originalname);
+          usedOcr = true;
+        }
       } else if (
         mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
         name.endsWith(".docx")
@@ -968,11 +1053,11 @@ app.post(
       }
     } catch (parseErr) {
       console.error("[tender/extract] parse error:", parseErr.message);
-      return res.status(422).json({ error: "Could not read the document. Ensure the file is not password-protected." });
+      return res.status(422).json({ error: "Could not read the document. Ensure the file is not password-protected or corrupted." });
     }
 
     if (!rawText.trim()) {
-      return res.status(422).json({ error: "No readable text found in the document. It may be a scanned image PDF." });
+      return res.status(422).json({ error: "No readable text could be extracted. The document may be fully image-based with no recognisable text." });
     }
 
     // Clean and structure the extracted text
@@ -1085,6 +1170,7 @@ Extract and return the following JSON object:
       success: true,
       tenderName,
       fileName: file.originalname,
+      usedOcr,
       analysis,
     });
   }

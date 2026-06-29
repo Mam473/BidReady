@@ -361,10 +361,19 @@ export default function TenderAnalyzer() {
           <div className="card p-5 bg-gradient-to-r from-brand-950 to-brand-800 text-white">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <Badge text={ti.tenderType || "TENDER"} variant={tenderTypeColor} />
                   {ti.sector && ti.sector !== "Not Specified" && (
                     <Badge text={ti.sector} variant="default" />
+                  )}
+                  {result.usedOcr && (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      OCR
+                    </span>
                   )}
                 </div>
                 <h2 className="text-lg font-bold text-white leading-tight">
