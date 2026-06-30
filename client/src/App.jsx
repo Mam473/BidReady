@@ -7,6 +7,7 @@ import Tenders from "./pages/Tenders.jsx";
 import Analysis from "./pages/Analysis.jsx";
 import TenderAnalyzer from "./pages/TenderAnalyzer.jsx";
 import TenderReadinessDashboard from "./pages/TenderReadinessDashboard.jsx";
+import ComplianceAnalysis from "./pages/ComplianceAnalysis.jsx";
 import Pricing from "./pages/Pricing.jsx";
 import PaymentSuccess from "./pages/PaymentSuccess.jsx";
 import Admin from "./pages/Admin.jsx";
@@ -36,6 +37,7 @@ export default function App() {
           <Route path="tenders" element={<Tenders />} />
           <Route path="tender-analyzer" element={<TenderAnalyzer />} />
           <Route path="tender-readiness" element={<TenderReadinessDashboard />} />
+          <Route path="compliance-analysis" element={<ComplianceAnalysis />} />
           <Route path="analysis" element={<Analysis />} />
           <Route path="pricing" element={<Pricing />} />
           <Route path="admin" element={<Admin />} />

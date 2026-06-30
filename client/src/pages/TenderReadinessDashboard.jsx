@@ -1332,6 +1332,20 @@ export default function TenderReadinessDashboard() {
         </div>
       </SectionCard>
 
+      {/* ── Analyze My Readiness CTA ─────────────────────────────────────────── */}
+      <div className="flex flex-col items-center gap-3 py-8">
+        <button
+          onClick={() => navigate("/compliance-analysis")}
+          className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 text-white text-base font-bold shadow-lg shadow-violet-200 hover:shadow-violet-300 transition-all duration-200 active:scale-95"
+        >
+          <ShieldCheck className="w-5 h-5" />
+          Analyze My Readiness
+        </button>
+        <p className="text-xs text-slate-400">
+          Powered by the Compliance Matching Engine — coming next
+        </p>
+      </div>
+
     </div>
   );
 }
