@@ -16,6 +16,8 @@ import {
   CheckSquare,
   Square,
   BookOpen,
+  Shield,
+  CircleDot,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -191,6 +193,74 @@ function RequiredDocumentsSection({ items = [] }) {
   );
 }
 
+// ── Eligibility Requirements section ─────────────────────────────────────────
+
+function EligibilityRequirementsSection({ items = [] }) {
+  if (items.length === 0) {
+    return (
+      <div className="card p-5">
+        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+          <Shield className="w-4 h-4 text-blue-500" />
+          <h3 className="text-sm font-semibold text-slate-700">Eligibility Requirements</h3>
+          <span className="ml-auto text-xs font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">0</span>
+        </div>
+        <p className="text-sm text-slate-400 italic">No eligibility requirements found in the analysis.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card p-5">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+        <Shield className="w-4 h-4 text-blue-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Eligibility Requirements</h3>
+        <span className="ml-auto text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-2.5 py-0.5 rounded-full">
+          {items.length}
+        </span>
+      </div>
+
+      {/* Scrollable list */}
+      <div className="overflow-y-auto max-h-96 -mr-1 pr-1 space-y-2">
+        {items.map((req, i) => {
+          const isMandatory = req.mandatory === true || req.mandatory === "true";
+          const hasSection  = req.section && req.section !== "Not Specified";
+
+          return (
+            <div
+              key={i}
+              className="flex items-start gap-3 p-3 rounded-xl border border-slate-100 hover:border-blue-200 hover:bg-blue-50/30 transition-colors"
+            >
+              {/* Bullet */}
+              <div className="shrink-0 mt-0.5">
+                <CircleDot className="w-4 h-4 text-blue-400" />
+              </div>
+
+              {/* Requirement info */}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-800 leading-snug">{req.name}</p>
+                {hasSection && (
+                  <div className="flex items-center gap-1 mt-1">
+                    <BookOpen className="w-3 h-3 text-slate-400 shrink-0" />
+                    <p className="text-xs text-slate-400 truncate">{req.section}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Mandatory badge */}
+              {isMandatory && (
+                <span className="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">
+                  Required
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Remaining placeholder building blocks ────────────────────────────────────
 
 function SectionCard({ icon: Icon, title, children }) {
@@ -354,6 +424,9 @@ export default function TenderReadinessDashboard() {
 
           {/* ── Required Documents checklist ── */}
           <RequiredDocumentsSection items={analysis.requiredDocuments || []} />
+
+          {/* ── Eligibility Requirements list ── */}
+          <EligibilityRequirementsSection items={analysis.eligibilityRequirements || []} />
         </>
       )}
 
