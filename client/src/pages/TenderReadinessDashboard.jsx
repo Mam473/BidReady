@@ -18,6 +18,8 @@ import {
   BookOpen,
   Shield,
   CircleDot,
+  DollarSign,
+  Minus,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -261,6 +263,96 @@ function EligibilityRequirementsSection({ items = [] }) {
   );
 }
 
+// ── Financial Requirements card ───────────────────────────────────────────────
+
+const FINANCIAL_FIELDS = [
+  { label: "Minimum Turnover",           keywords: ["turnover", "annual revenue", "annual turnover", "minimum revenue"] },
+  { label: "Working Capital",            keywords: ["working capital", "net working capital"] },
+  { label: "Audited Financial Statements", keywords: ["audited", "financial statement", "financial account", "financial report"] },
+  { label: "Bank Reference",             keywords: ["bank reference", "bank letter", "banker", "bank confirmation"] },
+  { label: "Financial Ratios",           keywords: ["ratio", "current ratio", "liquidity", "solvency", "financial ratio"] },
+];
+
+function extractFinancialField(items, keywords) {
+  const match = items.find((item) =>
+    keywords.some((kw) => item.name?.toLowerCase().includes(kw))
+  );
+  return match ? match.name : null;
+}
+
+function FinancialRequirementsCard({ items = [] }) {
+  const fields = FINANCIAL_FIELDS.map(({ label, keywords }) => ({
+    label,
+    value: extractFinancialField(items, keywords),
+  }));
+
+  return (
+    <div className="card p-5">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+        <DollarSign className="w-4 h-4 text-amber-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Financial Requirements</h3>
+        {items.length > 0 && (
+          <span className="ml-auto text-xs font-bold text-amber-600 bg-amber-50 border border-amber-100 px-2.5 py-0.5 rounded-full">
+            {items.length} found
+          </span>
+        )}
+      </div>
+
+      {/* Field rows */}
+      <div className="space-y-0">
+        {fields.map(({ label, value }) => (
+          <div
+            key={label}
+            className="flex flex-col sm:flex-row sm:items-start gap-1 py-3 border-b border-slate-50 last:border-0"
+          >
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide sm:w-52 shrink-0 pt-0.5">
+              {label}
+            </span>
+            {value ? (
+              <p className="text-sm text-slate-800 font-medium leading-snug">{value}</p>
+            ) : (
+              <span className="flex items-center gap-1 text-sm text-slate-300 italic">
+                <Minus className="w-3 h-3" /> Not Specified
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Raw items fallback — shows remaining items the keywords didn't bucket */}
+      {items.length > 0 && (
+        <details className="mt-3 group">
+          <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600 font-medium select-none list-none flex items-center gap-1">
+            <span className="group-open:hidden">▸</span>
+            <span className="hidden group-open:inline">▾</span>
+            View all {items.length} extracted items
+          </summary>
+          <div className="mt-3 overflow-y-auto max-h-56 -mr-1 pr-1 space-y-2">
+            {items.map((req, i) => {
+              const hasSection = req.section && req.section !== "Not Specified";
+              return (
+                <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-amber-50/40 border border-amber-100">
+                  <DollarSign className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-slate-700 leading-snug">{req.name}</p>
+                    {hasSection && (
+                      <div className="flex items-center gap-1 mt-1">
+                        <BookOpen className="w-3 h-3 text-slate-400 shrink-0" />
+                        <p className="text-xs text-slate-400 truncate">{req.section}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 // ── Remaining placeholder building blocks ────────────────────────────────────
 
 function SectionCard({ icon: Icon, title, children }) {
@@ -427,6 +519,9 @@ export default function TenderReadinessDashboard() {
 
           {/* ── Eligibility Requirements list ── */}
           <EligibilityRequirementsSection items={analysis.eligibilityRequirements || []} />
+
+          {/* ── Financial Requirements card ── */}
+          <FinancialRequirementsCard items={analysis.financialRequirements || []} />
         </>
       )}
 
