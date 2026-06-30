@@ -252,6 +252,123 @@ function TenderRequirementsSection({ tenderData }) {
   );
 }
 
+// ── Company Documents section ─────────────────────────────────────────────────
+function statusOf(expiryDate) {
+  if (!expiryDate) return { label: "No Expiry",  cls: "bg-slate-100 text-slate-500 border-slate-200",   dot: "bg-slate-400"   };
+  const days = Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
+  if (days < 0)   return { label: "Expired",      cls: "bg-red-50 text-red-600 border-red-200",           dot: "bg-red-500"     };
+  if (days <= 30) return { label: `Expiring (${days}d)`, cls: "bg-amber-50 text-amber-600 border-amber-200", dot: "bg-amber-400" };
+  return           { label: "Valid",             cls: "bg-emerald-50 text-emerald-600 border-emerald-200", dot: "bg-emerald-500" };
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+function CompanyDocumentsSection({ docs }) {
+  const valid    = docs.filter((d) => { const s = statusOf(d.expiryDate); return s.label === "Valid" || s.label === "No Expiry"; });
+  const expiring = docs.filter((d) => statusOf(d.expiryDate).label.startsWith("Expiring"));
+  const expired  = docs.filter((d) => statusOf(d.expiryDate).label === "Expired");
+
+  return (
+    <SectionCard
+      icon={FileText}
+      title="Company Compliance Documents"
+      subtitle="Uploaded documents from your Document Vault"
+      badge={docs.length > 0 ? `${docs.length} uploaded` : "None uploaded"}
+      color="violet"
+    >
+      {docs.length === 0 ? (
+        /* ── Empty state ── */
+        <div className="flex flex-col items-center justify-center py-12 gap-3">
+          <div className="w-14 h-14 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center">
+            <FileText className="w-7 h-7 text-slate-200" />
+          </div>
+          <p className="text-sm font-semibold text-slate-400">Not Uploaded</p>
+          <p className="text-xs text-slate-300 text-center max-w-xs">
+            No compliance documents found. Upload your documents in the Documents section first.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Summary strip */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-100 text-center">
+              <p className="text-xl font-extrabold text-emerald-600">{valid.length}</p>
+              <p className="text-xs text-emerald-600 font-medium mt-0.5">Valid</p>
+            </div>
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-100 text-center">
+              <p className="text-xl font-extrabold text-amber-600">{expiring.length}</p>
+              <p className="text-xs text-amber-600 font-medium mt-0.5">Expiring Soon</p>
+            </div>
+            <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-center">
+              <p className="text-xl font-extrabold text-red-600">{expired.length}</p>
+              <p className="text-xs text-red-600 font-medium mt-0.5">Expired</p>
+            </div>
+          </div>
+
+          {/* Column headers */}
+          <div className="grid grid-cols-[2rem_1fr_110px_110px_120px] gap-3 px-3 py-2">
+            <span />
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Document Name</span>
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Uploaded</span>
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Expires</span>
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Status</span>
+          </div>
+          <div className="h-px bg-slate-100" />
+
+          {/* Rows — scrollable */}
+          <div className="max-h-[400px] overflow-y-auto pr-1 space-y-0.5">
+            {docs.map((doc, i) => {
+              const st = statusOf(doc.expiryDate);
+              return (
+                <div
+                  key={doc.id || i}
+                  className="grid grid-cols-[2rem_1fr_110px_110px_120px] gap-3 items-start px-3 py-3 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100"
+                >
+                  {/* Index */}
+                  <span className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 mt-0.5">
+                    {i + 1}
+                  </span>
+
+                  {/* Name + type */}
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-800 leading-snug truncate">{doc.name}</p>
+                    {doc.type && doc.type !== doc.name && (
+                      <p className="text-xs text-slate-400 truncate mt-0.5">{doc.type}</p>
+                    )}
+                  </div>
+
+                  {/* Uploaded */}
+                  <p className="text-xs text-slate-500 mt-0.5">{fmtDate(doc.uploadedAt)}</p>
+
+                  {/* Expires */}
+                  <p className="text-xs text-slate-500 mt-0.5">{doc.expiryDate ? fmtDate(doc.expiryDate) : <span className="text-slate-300 italic">None</span>}</p>
+
+                  {/* Status */}
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border whitespace-nowrap w-fit ${st.cls}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${st.dot}`} />
+                    {st.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Footer note */}
+          <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
+            <Cpu className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+            <p className="text-xs text-slate-400">
+              These documents will be matched against tender requirements when the Compliance Engine runs.
+            </p>
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ── Required Documents table ──────────────────────────────────────────────────
 function RequiredDocumentsTable({ tenderData }) {
   const items = tenderData?.analysis?.requiredDocuments || [];
@@ -625,6 +742,9 @@ export default function ComplianceAnalysis() {
         {/* 3. Readiness Score */}
         <ReadinessScoreSection />
       </div>
+
+      {/* Company Documents — full width */}
+      <CompanyDocumentsSection docs={docs} />
 
       {/* Required Documents — full width */}
       <RequiredDocumentsTable tenderData={tenderData} />
