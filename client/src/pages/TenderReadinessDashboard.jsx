@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   FileCheck2,
   CalendarClock,
@@ -10,37 +10,114 @@ import {
   TrendingUp,
   ArrowRight,
   Gauge,
+  Building2,
+  FileText,
+  Calendar,
+  AlertOctagon,
+  ScanSearch,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
-// ── Placeholder building blocks ─────────────────────────────────────────────
+// ── Data helpers ─────────────────────────────────────────────────────────────
 
-function StatCard({ icon: Icon, label, color = "brand" }) {
+function useTenderAnalysis() {
+  return useMemo(() => {
+    try {
+      const raw = localStorage.getItem("bidready_tender_analysis");
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }, []);
+}
+
+function val(v) {
+  return !v || v === "Not Specified" ? null : v;
+}
+
+// ── Info card — text value ────────────────────────────────────────────────────
+
+function InfoCard({ icon: Icon, label, value, color = "brand", wide = false }) {
   const colors = {
-    brand:  { bg: "bg-brand-50",   icon: "text-brand-500",  bar: "bg-brand-200"  },
-    green:  { bg: "bg-green-50",   icon: "text-green-500",  bar: "bg-green-200"  },
-    amber:  { bg: "bg-amber-50",   icon: "text-amber-500",  bar: "bg-amber-200"  },
-    red:    { bg: "bg-red-50",     icon: "text-red-500",    bar: "bg-red-200"    },
+    brand:  { bg: "bg-brand-50",   icon: "text-brand-500",  text: "text-brand-700"  },
+    violet: { bg: "bg-violet-50",  icon: "text-violet-500", text: "text-violet-700" },
+    slate:  { bg: "bg-slate-100",  icon: "text-slate-400",  text: "text-slate-600"  },
   };
   const c = colors[color] || colors.brand;
+  const isEmpty = !value;
+
   return (
-    <div className="card p-5">
-      <div className="flex items-center justify-between mb-4">
-        <div className={`w-9 h-9 rounded-xl ${c.bg} flex items-center justify-center`}>
-          <Icon className={`w-4 h-4 ${c.icon}`} />
-        </div>
-        <div className={`h-2 w-16 rounded-full ${c.bar} animate-pulse`} />
+    <div className={`card p-5 flex flex-col gap-3 ${wide ? "sm:col-span-2 lg:col-span-1" : ""}`}>
+      <div className={`w-9 h-9 rounded-xl ${c.bg} flex items-center justify-center shrink-0`}>
+        <Icon className={`w-4 h-4 ${c.icon}`} />
       </div>
-      <div className={`h-7 w-20 rounded-lg ${c.bar} animate-pulse mb-2`} />
-      <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">{label}</p>
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">{label}</p>
+        {isEmpty
+          ? <div className="h-4 w-32 rounded-full bg-slate-100 animate-pulse" />
+          : <p className="text-sm font-semibold text-slate-800 leading-snug line-clamp-2">{value}</p>
+        }
+      </div>
     </div>
   );
 }
 
-function PlaceholderRow({ wide = false }) {
+// ── Count card — numeric value ────────────────────────────────────────────────
+
+function CountCard({ icon: Icon, label, count, color = "green" }) {
+  const colors = {
+    green: { bg: "bg-green-50",  icon: "text-green-500",  num: "text-green-700",  pill: "bg-green-100 text-green-700"  },
+    amber: { bg: "bg-amber-50",  icon: "text-amber-500",  num: "text-amber-700",  pill: "bg-amber-100 text-amber-700"  },
+    red:   { bg: "bg-red-50",    icon: "text-red-500",    num: "text-red-700",    pill: "bg-red-100 text-red-700"      },
+  };
+  const c = colors[color] || colors.green;
+  const hasData = count !== null;
+
   return (
-    <div className={`h-3 rounded-full bg-slate-100 animate-pulse ${wide ? "w-4/5" : "w-3/5"}`} />
+    <div className="card p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div className={`w-9 h-9 rounded-xl ${c.bg} flex items-center justify-center`}>
+          <Icon className={`w-4 h-4 ${c.icon}`} />
+        </div>
+        {hasData && (
+          <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${c.pill}`}>
+            {count}
+          </span>
+        )}
+      </div>
+      {hasData
+        ? <p className={`text-3xl font-extrabold ${c.num} mb-1`}>{count}</p>
+        : <div className="h-8 w-12 rounded-lg bg-slate-100 animate-pulse mb-1" />
+      }
+      <p className="text-xs text-slate-400 font-medium uppercase tracking-wide leading-tight">{label}</p>
+    </div>
   );
 }
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+
+function EmptyState({ onGoAnalyze }) {
+  return (
+    <div className="card p-8 flex flex-col items-center text-center gap-4">
+      <div className="w-14 h-14 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center">
+        <Gauge className="w-7 h-7 text-brand-400" />
+      </div>
+      <div>
+        <p className="font-bold text-slate-700 text-base">No analysis loaded yet</p>
+        <p className="text-sm text-slate-400 mt-1 max-w-xs">
+          Upload a tender document in the Tender Analyzer to populate this dashboard with real data.
+        </p>
+      </div>
+      <button onClick={onGoAnalyze} className="btn-primary text-sm">
+        <ScanSearch className="w-4 h-4" />
+        Go to Tender Analyzer
+      </button>
+    </div>
+  );
+}
+
+// ── Remaining placeholder building blocks ────────────────────────────────────
 
 function SectionCard({ icon: Icon, title, children }) {
   return (
@@ -51,6 +128,12 @@ function SectionCard({ icon: Icon, title, children }) {
       </div>
       {children}
     </div>
+  );
+}
+
+function PlaceholderRow({ wide = false }) {
+  return (
+    <div className={`h-3 rounded-full bg-slate-100 animate-pulse ${wide ? "w-4/5" : "w-3/5"}`} />
   );
 }
 
@@ -96,38 +179,27 @@ function PlaceholderActionItem() {
   );
 }
 
-// ── Gauge ring placeholder ───────────────────────────────────────────────────
-
-function ReadinessGauge() {
-  return (
-    <div className="flex flex-col items-center justify-center py-4">
-      <div className="relative w-28 h-28">
-        <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
-          <circle cx="60" cy="60" r="50" fill="none" stroke="#e2e8f0" strokeWidth="12" />
-          <circle
-            cx="60" cy="60" r="50"
-            fill="none"
-            stroke="#cbd5e1"
-            strokeWidth="12"
-            strokeDasharray="314"
-            strokeDashoffset="94"
-            strokeLinecap="round"
-            className="animate-pulse"
-          />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <div className="w-10 h-6 rounded-lg bg-slate-100 animate-pulse mb-1" />
-          <div className="w-6 h-2 rounded-full bg-slate-100 animate-pulse" />
-        </div>
-      </div>
-      <p className="text-xs text-slate-400 font-medium mt-2">Overall Readiness Score</p>
-    </div>
-  );
-}
-
-// ── Main page ────────────────────────────────────────────────────────────────
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function TenderReadinessDashboard() {
+  const navigate  = useNavigate();
+  const saved     = useTenderAnalysis();
+  const analysis  = saved?.analysis || null;
+  const ti        = analysis?.tenderInfo        || {};
+  const sd        = analysis?.submissionDetails || {};
+  const hasData   = !!analysis;
+
+  const tenderTitle   = val(ti.tenderTitle)   || val(saved?.tenderName) || null;
+  const procEntity    = val(ti.procuringEntity) || null;
+  const deadline      = val(sd.submissionDeadline) || null;
+  const docsCount     = hasData ? (analysis.requiredDocuments?.length    ?? 0) : null;
+  const eligCount     = hasData ? (analysis.eligibilityRequirements?.length ?? 0) : null;
+  const riskCount     = hasData ? (analysis.disqualificationRisks?.length   ?? 0) : null;
+
+  const savedAt = saved?.savedAt
+    ? new Date(saved.savedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    : null;
+
   return (
     <div className="space-y-6">
 
@@ -139,46 +211,79 @@ export default function TenderReadinessDashboard() {
             <h1 className="text-xl font-bold text-slate-900">Tender Readiness Dashboard</h1>
           </div>
           <p className="text-sm text-slate-500">
-            A full readiness snapshot for your active tender. Run an analysis in the Tender Analyzer to populate this dashboard.
+            A readiness snapshot for your active tender.
+            {!hasData && " Run an analysis in the Tender Analyzer to populate this dashboard."}
           </p>
         </div>
-        <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-slate-100 text-slate-400">
-          <Clock className="w-3 h-3" />
-          No analysis loaded
-        </span>
+
+        {hasData && savedAt ? (
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">
+            <BadgeCheck className="w-3 h-3" />
+            Analysis loaded · {savedAt}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-slate-100 text-slate-400">
+            <Clock className="w-3 h-3" />
+            No analysis loaded
+          </span>
+        )}
       </div>
 
-      {/* Top stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={TrendingUp}   label="Readiness Score"    color="brand" />
-        <StatCard icon={BadgeCheck}   label="Documents Ready"    color="green" />
-        <StatCard icon={AlertTriangle} label="Outstanding Items" color="amber" />
-        <StatCard icon={CalendarClock} label="Days to Deadline"  color="red"   />
-      </div>
-
-      {/* Readiness gauge + Document compliance */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-        {/* Gauge */}
-        <div className="card p-5 flex flex-col">
-          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
-            <Gauge className="w-4 h-4 text-brand-500" />
-            <h3 className="text-sm font-semibold text-slate-700">Readiness Score</h3>
+      {/* Empty state or summary cards */}
+      {!hasData ? (
+        <EmptyState onGoAnalyze={() => navigate("/tender-analyzer")} />
+      ) : (
+        <>
+          {/* ── Row 1: Info cards — Tender Title, Procuring Entity, Deadline ── */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <InfoCard
+              icon={FileText}
+              label="Tender Title"
+              value={tenderTitle}
+              color="brand"
+            />
+            <InfoCard
+              icon={Building2}
+              label="Procuring Entity"
+              value={procEntity}
+              color="brand"
+            />
+            <InfoCard
+              icon={Calendar}
+              label="Submission Deadline"
+              value={deadline}
+              color="violet"
+            />
           </div>
-          <ReadinessGauge />
-          <div className="mt-4 space-y-2">
-            {["Documents", "Eligibility", "Financial", "Technical"].map((label) => (
-              <div key={label} className="flex items-center gap-2">
-                <span className="text-xs text-slate-400 w-20 shrink-0">{label}</span>
-                <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                  <div className="h-full w-0 bg-slate-200 rounded-full animate-pulse" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
 
-        {/* Document compliance */}
+          {/* ── Row 2: Count cards — Docs, Eligibility, Risks ── */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <CountCard
+              icon={FileCheck2}
+              label="Required Documents"
+              count={docsCount}
+              color="green"
+            />
+            <CountCard
+              icon={ClipboardList}
+              label="Eligibility Requirements"
+              count={eligCount}
+              color="amber"
+            />
+            <CountCard
+              icon={AlertOctagon}
+              label="Disqualification Risks"
+              count={riskCount}
+              color="red"
+            />
+          </div>
+        </>
+      )}
+
+      {/* ── Placeholder sections (always shown below) ─────────────────────── */}
+
+      {/* Document compliance + Key dates */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SectionCard icon={FileCheck2} title="Document Compliance">
           <div className="space-y-0.5">
             {[...Array(5)].map((_, i) => (
@@ -187,7 +292,6 @@ export default function TenderReadinessDashboard() {
           </div>
         </SectionCard>
 
-        {/* Key dates */}
         <SectionCard icon={CalendarClock} title="Key Dates">
           <div className="space-y-0.5">
             {[...Array(5)].map((_, i) => (
@@ -195,12 +299,10 @@ export default function TenderReadinessDashboard() {
             ))}
           </div>
         </SectionCard>
-
       </div>
 
       {/* Eligibility + Risk factors */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
         <SectionCard icon={ClipboardList} title="Eligibility & Qualification">
           <div className="space-y-2">
             <PlaceholderRow wide />
@@ -233,10 +335,9 @@ export default function TenderReadinessDashboard() {
             ))}
           </div>
         </SectionCard>
-
       </div>
 
-      {/* Action items — full width */}
+      {/* Action items */}
       <SectionCard icon={ClipboardList} title="Action Items">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {[...Array(6)].map((_, i) => (
