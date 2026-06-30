@@ -11,6 +11,7 @@ import {
   CreditCard,
   LayoutDashboard,
   ScanSearch,
+  Gauge,
 } from "lucide-react";
 import ChatWidget from "./ChatWidget.jsx";
 
