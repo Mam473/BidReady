@@ -445,12 +445,43 @@ function matchDocumentStatus(requiredDoc, companyDocs) {
   return "Available";
 }
 
+// Traffic-light definitions — each has a large circle colour + label badge colours
 const COMPLIANCE_BADGE = {
-  "Available":        { cls: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500", icon: "✓" },
-  "Missing":          { cls: "bg-red-50 text-red-600 border-red-200",             dot: "bg-red-500",     icon: "✗" },
-  "Expired":          { cls: "bg-rose-50 text-rose-700 border-rose-200",          dot: "bg-rose-500",    icon: "!" },
-  "Expiring Soon":    { cls: "bg-amber-50 text-amber-700 border-amber-200",       dot: "bg-amber-400",   icon: "⚠" },
-  "Cannot Determine": { cls: "bg-slate-100 text-slate-500 border-slate-200",      dot: "bg-slate-400",   icon: "?" },
+  "Available":        {
+    light: "bg-emerald-500 shadow-emerald-300",
+    ring:  "ring-emerald-200",
+    cls:   "bg-emerald-50 text-emerald-700 border-emerald-200",
+    dot:   "bg-emerald-500",
+    row:   "hover:bg-emerald-50/40",
+  },
+  "Expiring Soon":    {
+    light: "bg-yellow-400 shadow-yellow-200",
+    ring:  "ring-yellow-200",
+    cls:   "bg-amber-50 text-amber-700 border-amber-200",
+    dot:   "bg-yellow-400",
+    row:   "bg-amber-50/30 hover:bg-amber-50/50 border-amber-100/60",
+  },
+  "Missing":          {
+    light: "bg-red-500 shadow-red-200",
+    ring:  "ring-red-200",
+    cls:   "bg-red-50 text-red-600 border-red-200",
+    dot:   "bg-red-500",
+    row:   "bg-red-50/30 hover:bg-red-50/50 border-red-100/60",
+  },
+  "Expired":          {
+    light: "bg-red-600 shadow-red-300",
+    ring:  "ring-red-200",
+    cls:   "bg-rose-50 text-rose-700 border-rose-200",
+    dot:   "bg-red-600",
+    row:   "bg-rose-50/30 hover:bg-rose-50/50 border-rose-100/60",
+  },
+  "Cannot Determine": {
+    light: "bg-slate-300 shadow-slate-200",
+    ring:  "ring-slate-200",
+    cls:   "bg-slate-100 text-slate-500 border-slate-200",
+    dot:   "bg-slate-400",
+    row:   "hover:bg-slate-50",
+  },
 };
 
 // ── Required Documents table (with compliance matching) ───────────────────────
@@ -502,34 +533,27 @@ function RequiredDocumentsTable({ tenderData, docs }) {
     const hasSection  = doc.section && doc.section !== "Not Specified";
     const badge       = COMPLIANCE_BADGE[doc.complianceStatus] || COMPLIANCE_BADGE["Cannot Determine"];
 
-    // Row background tint based on compliance status
-    const rowBg =
-      doc.complianceStatus === "Available"     ? "hover:bg-emerald-50/40" :
-      doc.complianceStatus === "Missing"       ? "bg-red-50/30 hover:bg-red-50/50 border-red-100/60" :
-      doc.complianceStatus === "Expired"       ? "bg-rose-50/30 hover:bg-rose-50/50 border-rose-100/60" :
-      doc.complianceStatus === "Expiring Soon" ? "bg-amber-50/30 hover:bg-amber-50/50 border-amber-100/60" :
-      "hover:bg-slate-50";
-
     return (
-      <div className={`grid grid-cols-[2rem_1fr_auto] sm:grid-cols-[2rem_1fr_110px_150px_160px] gap-3 items-start px-4 py-3 rounded-xl transition-colors border border-transparent ${rowBg}`}>
-        {/* Row number */}
-        <span className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 mt-0.5">
-          {index + 1}
-        </span>
+      <div className={`flex items-center gap-4 px-4 py-3 rounded-xl transition-colors border border-transparent ${badge.row}`}>
 
-        {/* Document name */}
-        <div className="min-w-0">
+        {/* ── Traffic light circle ── */}
+        <div className="shrink-0 flex flex-col items-center gap-0.5">
+          <div className={`w-4 h-4 rounded-full shadow-md ring-2 ring-offset-1 ${badge.light} ${badge.ring}`} />
+        </div>
+
+        {/* ── Document name + section ref ── */}
+        <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-slate-800 leading-snug">{doc.name}</p>
           {hasSection && (
             <span className="inline-flex items-center gap-1 text-xs text-violet-500 mt-0.5">
               <BookOpen className="w-2.5 h-2.5 shrink-0" />
-              <span className="truncate max-w-[200px]" title={doc.section}>{doc.section}</span>
+              <span className="truncate max-w-[220px]" title={doc.section}>{doc.section}</span>
             </span>
           )}
         </div>
 
-        {/* Mandatory — hidden on mobile, shown on sm+ */}
-        <div className="hidden sm:flex justify-center">
+        {/* ── Mandatory badge — hidden on mobile ── */}
+        <div className="hidden sm:flex shrink-0">
           {isMandatory ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-50 text-red-600 border border-red-200 whitespace-nowrap">
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
@@ -543,13 +567,11 @@ function RequiredDocumentsTable({ tenderData, docs }) {
           )}
         </div>
 
-        {/* Compliance status — always visible */}
-        <div className="sm:col-span-1 col-span-1 flex justify-end sm:justify-center">
-          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border whitespace-nowrap ${badge.cls}`}>
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dot}`} />
-            {doc.complianceStatus}
-          </span>
-        </div>
+        {/* ── Status label badge — always visible ── */}
+        <span className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border whitespace-nowrap ${badge.cls}`}>
+          <span className={`w-2 h-2 rounded-full shrink-0 ${badge.dot}`} />
+          {doc.complianceStatus}
+        </span>
       </div>
     );
   }
