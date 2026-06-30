@@ -4,10 +4,8 @@ import {
   CalendarClock,
   ShieldAlert,
   ClipboardList,
-  AlertTriangle,
   BadgeCheck,
   Clock,
-  TrendingUp,
   ArrowRight,
   Gauge,
   Building2,
@@ -15,6 +13,9 @@ import {
   Calendar,
   AlertOctagon,
   ScanSearch,
+  CheckSquare,
+  Square,
+  BookOpen,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -113,6 +114,79 @@ function EmptyState({ onGoAnalyze }) {
         <ScanSearch className="w-4 h-4" />
         Go to Tender Analyzer
       </button>
+    </div>
+  );
+}
+
+// ── Required Documents section ───────────────────────────────────────────────
+
+function RequiredDocumentsSection({ items = [] }) {
+  if (items.length === 0) {
+    return (
+      <div className="card p-5">
+        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+          <FileCheck2 className="w-4 h-4 text-brand-500" />
+          <h3 className="text-sm font-semibold text-slate-700">Required Documents</h3>
+          <span className="ml-auto text-xs font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">0</span>
+        </div>
+        <p className="text-sm text-slate-400 italic">No required documents found in the analysis.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card p-5">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+        <FileCheck2 className="w-4 h-4 text-brand-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Required Documents</h3>
+        <span className="ml-auto text-xs font-bold text-brand-600 bg-brand-50 border border-brand-100 px-2.5 py-0.5 rounded-full">
+          {items.length}
+        </span>
+      </div>
+
+      {/* Scrollable list */}
+      <div className="overflow-y-auto max-h-96 -mr-1 pr-1 space-y-2">
+        {items.map((doc, i) => {
+          const isMandatory = doc.mandatory === true || doc.mandatory === "true";
+          const hasSection  = doc.section && doc.section !== "Not Specified";
+
+          return (
+            <div
+              key={i}
+              className="flex items-start gap-3 p-3 rounded-xl border border-slate-100 hover:border-brand-200 hover:bg-brand-50/30 transition-colors"
+            >
+              {/* Checkbox icon */}
+              <div className="shrink-0 mt-0.5">
+                {isMandatory
+                  ? <CheckSquare className="w-4 h-4 text-brand-500" />
+                  : <Square className="w-4 h-4 text-slate-300" />
+                }
+              </div>
+
+              {/* Document info */}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-800 leading-snug">{doc.name}</p>
+                {hasSection && (
+                  <div className="flex items-center gap-1 mt-1">
+                    <BookOpen className="w-3 h-3 text-slate-400 shrink-0" />
+                    <p className="text-xs text-slate-400 truncate">{doc.section}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Mandatory badge */}
+              <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${
+                isMandatory
+                  ? "bg-red-50 text-red-600 border border-red-200"
+                  : "bg-slate-100 text-slate-500"
+              }`}>
+                {isMandatory ? "Mandatory" : "Optional"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -277,6 +351,9 @@ export default function TenderReadinessDashboard() {
               color="red"
             />
           </div>
+
+          {/* ── Required Documents checklist ── */}
+          <RequiredDocumentsSection items={analysis.requiredDocuments || []} />
         </>
       )}
 
