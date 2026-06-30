@@ -133,6 +133,108 @@ function EmptyState({ onGoAnalyze }) {
   );
 }
 
+// ── Bid Readiness Score card ─────────────────────────────────────────────────
+
+const SCORE      = 82;
+const STATUS     = "Nearly Ready";
+const CRITICAL   = 3;
+const CIRCUMFERENCE = 2 * Math.PI * 54; // r=54
+
+const STATUS_STYLES = {
+  "Ready":         { ring: "#22c55e", bg: "from-emerald-50 to-emerald-100/50", badge: "bg-emerald-100 text-emerald-700 border-emerald-300", text: "text-emerald-700" },
+  "Nearly Ready":  { ring: "#f59e0b", bg: "from-amber-50 to-amber-100/50",   badge: "bg-amber-100 text-amber-700 border-amber-300",   text: "text-amber-700"   },
+  "Not Ready":     { ring: "#ef4444", bg: "from-red-50 to-red-100/50",       badge: "bg-red-100 text-red-700 border-red-300",         text: "text-red-700"     },
+};
+
+function BidReadinessScoreCard() {
+  const style  = STATUS_STYLES[STATUS] || STATUS_STYLES["Nearly Ready"];
+  const offset = CIRCUMFERENCE - (SCORE / 100) * CIRCUMFERENCE;
+
+  return (
+    <div className={`card p-6 bg-gradient-to-br ${style.bg} border border-slate-200`}>
+      <div className="flex flex-col sm:flex-row items-center gap-6">
+
+        {/* ── Circular gauge ── */}
+        <div className="relative shrink-0 w-40 h-40">
+          <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
+            {/* Track */}
+            <circle cx="60" cy="60" r="54" fill="none" stroke="#e2e8f0" strokeWidth="10" />
+            {/* Progress */}
+            <circle
+              cx="60" cy="60" r="54"
+              fill="none"
+              stroke={style.ring}
+              strokeWidth="10"
+              strokeLinecap="round"
+              strokeDasharray={CIRCUMFERENCE}
+              strokeDashoffset={offset}
+              style={{ transition: "stroke-dashoffset 1s ease" }}
+            />
+          </svg>
+          {/* Centre text */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-3xl font-extrabold text-slate-900 leading-none">{SCORE}%</span>
+            <span className="text-xs font-semibold text-slate-400 mt-1 uppercase tracking-wide">Score</span>
+          </div>
+        </div>
+
+        {/* ── Right side ── */}
+        <div className="flex-1 text-center sm:text-left space-y-4">
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Overall Readiness</p>
+            <p className="text-4xl font-extrabold text-slate-900 leading-none">{SCORE}%</p>
+          </div>
+
+          <div className="flex flex-wrap justify-center sm:justify-start gap-3">
+            {/* Status badge */}
+            <div>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Status</p>
+              <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-bold border ${style.badge}`}>
+                {STATUS}
+              </span>
+            </div>
+
+            {/* Critical issues */}
+            <div>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Critical Issues</p>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold border bg-red-50 text-red-700 border-red-300">
+                <AlertOctagon className="w-3.5 h-3.5" />
+                {CRITICAL}
+              </span>
+            </div>
+          </div>
+
+          {/* Progress bar breakdown — placeholder */}
+          <div className="space-y-2 pt-1">
+            {[
+              { label: "Documents",   pct: 90 },
+              { label: "Eligibility", pct: 75 },
+              { label: "Financial",   pct: 80 },
+              { label: "Personnel",   pct: 70 },
+            ].map(({ label, pct }) => (
+              <div key={label} className="flex items-center gap-3">
+                <span className="text-xs text-slate-500 w-20 shrink-0">{label}</span>
+                <div className="flex-1 h-1.5 rounded-full bg-white/80 border border-slate-200 overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${pct}%`, backgroundColor: style.ring }}
+                  />
+                </div>
+                <span className="text-xs font-semibold text-slate-500 w-8 text-right">{pct}%</span>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-xs text-slate-400 italic">
+            Placeholder data — connects to Compliance Engine in a future update.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
 // ── Required Documents section ───────────────────────────────────────────────
 
 function RequiredDocumentsSection({ items = [] }) {
@@ -1131,6 +1233,9 @@ export default function TenderReadinessDashboard() {
               color="red"
             />
           </div>
+
+          {/* ── Bid Readiness Score ── */}
+          <BidReadinessScoreCard />
 
           {/* ── Required Documents checklist ── */}
           <RequiredDocumentsSection items={analysis.requiredDocuments || []} />
