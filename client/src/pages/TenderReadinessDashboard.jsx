@@ -28,6 +28,9 @@ import {
   ListChecks,
   Trophy,
   ShieldCheck,
+  CalendarDays,
+  Clock3,
+  CheckCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -813,6 +816,161 @@ function DisqualificationRisksSection({ items = [] }) {
   );
 }
 
+// ── Important Dates timeline ──────────────────────────────────────────────────
+
+const DATE_CATEGORIES = [
+  { label: "Pre-bid Meeting",        keywords: ["pre-bid", "pre bid", "pre-tender", "site visit", "mandatory briefing", "briefing session"] },
+  { label: "Clarification Deadline", keywords: ["clarification", "query", "queries deadline", "request for clarification"] },
+  { label: "Submission Deadline",    keywords: ["submission", "closing date", "bid closing", "deadline", "close of bid", "receipt of bids"] },
+  { label: "Opening Date",           keywords: ["opening", "bid opening", "public opening", "tender opening"] },
+  { label: "Award Date",             keywords: ["award", "contract award", "notification of award", "letter of award"] },
+];
+
+function matchDateCategory(event = "") {
+  const lower = event.toLowerCase();
+  return DATE_CATEGORIES.find(({ keywords }) =>
+    keywords.some((kw) => lower.includes(kw))
+  )?.label || null;
+}
+
+function parseDateValue(dateStr) {
+  if (!dateStr || dateStr === "Not Specified") return null;
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function daysFromNow(date) {
+  if (!date) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.round((date - today) / (1000 * 60 * 60 * 24));
+  return diff;
+}
+
+function formatDate(dateStr) {
+  const d = parseDateValue(dateStr);
+  if (!d) return dateStr || "—";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+const TIMELINE_COLORS = {
+  "Pre-bid Meeting":        { dot: "bg-violet-500", line: "border-violet-200", badge: "bg-violet-50 text-violet-700 border-violet-200", icon: "text-violet-500" },
+  "Clarification Deadline": { dot: "bg-amber-500",  line: "border-amber-200",  badge: "bg-amber-50 text-amber-700 border-amber-200",   icon: "text-amber-500"  },
+  "Submission Deadline":    { dot: "bg-red-500",    line: "border-red-200",    badge: "bg-red-50 text-red-700 border-red-200",         icon: "text-red-500"    },
+  "Opening Date":           { dot: "bg-blue-500",   line: "border-blue-200",   badge: "bg-blue-50 text-blue-700 border-blue-200",      icon: "text-blue-500"   },
+  "Award Date":             { dot: "bg-emerald-500",line: "border-emerald-200",badge: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: "text-emerald-500" },
+  default:                  { dot: "bg-slate-400",  line: "border-slate-200",  badge: "bg-slate-100 text-slate-600 border-slate-200",  icon: "text-slate-400"  },
+};
+
+function DaysPill({ days }) {
+  if (days === null) return null;
+  if (days < 0)  return <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-400 border border-slate-200">Passed</span>;
+  if (days === 0) return <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-300 animate-pulse">Today</span>;
+  if (days <= 7)  return <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">{days}d left</span>;
+  if (days <= 30) return <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">{days}d left</span>;
+  return <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">{days}d left</span>;
+}
+
+function ImportantDatesTimeline({ importantDates = [], submissionDeadline = null }) {
+  // Build the 5 canonical slots
+  const slots = DATE_CATEGORIES.map(({ label }) => {
+    // First try to match from importantDates
+    const match = importantDates.find(
+      (item) => matchDateCategory(item.event) === label
+    );
+    // Fallback: use submissionDeadline from submissionDetails for Submission Deadline slot
+    if (!match && label === "Submission Deadline" && submissionDeadline) {
+      return { label, date: submissionDeadline, time: null, section: null, raw: null };
+    }
+    return {
+      label,
+      date:    match?.date    || null,
+      time:    match?.time    || null,
+      section: match?.section || null,
+      raw:     match          || null,
+    };
+  });
+
+  // Sort: known dates first (chronologically), unknown last
+  const sorted = [...slots].sort((a, b) => {
+    const da = parseDateValue(a.date);
+    const db = parseDateValue(b.date);
+    if (da && db) return da - db;
+    if (da) return -1;
+    if (db) return 1;
+    return 0;
+  });
+
+  const knownCount = sorted.filter((s) => parseDateValue(s.date)).length;
+
+  return (
+    <div className="card p-5">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-5 pb-3 border-b border-slate-100">
+        <CalendarDays className="w-4 h-4 text-violet-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Important Dates</h3>
+        {knownCount > 0 && (
+          <span className="ml-auto text-xs font-bold text-violet-600 bg-violet-50 border border-violet-100 px-2.5 py-0.5 rounded-full">
+            {knownCount} of 5 found
+          </span>
+        )}
+      </div>
+
+      {/* Vertical timeline */}
+      <div className="space-y-0">
+        {sorted.map((slot, i) => {
+          const d    = parseDateValue(slot.date);
+          const days = daysFromNow(d);
+          const c    = TIMELINE_COLORS[slot.label] || TIMELINE_COLORS.default;
+          const isLast = i === sorted.length - 1;
+          const isPast = days !== null && days < 0;
+
+          return (
+            <div key={slot.label} className="flex gap-4">
+              {/* Timeline spine */}
+              <div className="flex flex-col items-center">
+                <div className={`w-3 h-3 rounded-full shrink-0 mt-1 ${d ? c.dot : "bg-slate-200"} ${isPast ? "opacity-50" : ""}`} />
+                {!isLast && <div className={`w-0.5 flex-1 border-l-2 border-dashed mt-1 mb-1 min-h-[28px] ${d ? c.line : "border-slate-100"}`} />}
+              </div>
+
+              {/* Content */}
+              <div className={`flex-1 pb-4 ${isLast ? "" : ""}`}>
+                <div className="flex items-start justify-between gap-2 flex-wrap">
+                  <div className="min-w-0">
+                    <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded-full border mb-1 ${d ? c.badge : "bg-slate-50 text-slate-400 border-slate-200"}`}>
+                      {slot.label}
+                    </span>
+                    {d ? (
+                      <p className={`text-sm font-semibold ${isPast ? "text-slate-400" : "text-slate-800"}`}>
+                        {formatDate(slot.date)}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-slate-300 italic">Not Specified</p>
+                    )}
+                    {slot.time && slot.time !== "Not Specified" && (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <Clock3 className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span className="text-xs text-slate-400">{slot.time}</span>
+                      </div>
+                    )}
+                    {slot.section && slot.section !== "Not Specified" && (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <BookOpen className="w-3 h-3 text-slate-400 shrink-0" />
+                        <span className="text-xs text-slate-400 truncate">{slot.section}</span>
+                      </div>
+                    )}
+                  </div>
+                  <DaysPill days={days} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Remaining placeholder building blocks ────────────────────────────────────
 
 function SectionCard({ icon: Icon, title, children }) {
@@ -991,6 +1149,12 @@ export default function TenderReadinessDashboard() {
 
           {/* ── Evaluation Criteria ── */}
           <EvaluationCriteriaSection ec={analysis.evaluationCriteria || {}} />
+
+          {/* ── Important Dates timeline ── */}
+          <ImportantDatesTimeline
+            importantDates={analysis.importantDates || []}
+            submissionDeadline={sd.submissionDeadline || null}
+          />
 
           {/* ── Critical Disqualification Risks ── */}
           <DisqualificationRisksSection items={analysis.disqualificationRisks || []} />
