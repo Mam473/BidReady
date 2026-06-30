@@ -27,6 +27,7 @@ import {
   BarChart3,
   ListChecks,
   Trophy,
+  ShieldCheck,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -741,6 +742,77 @@ function EvaluationCriteriaSection({ ec = {} }) {
   );
 }
 
+// ── Critical Disqualification Risks section ───────────────────────────────────
+
+function DisqualificationRisksSection({ items = [] }) {
+  const hasRisks = items.length > 0;
+
+  return (
+    <div className={`card p-5 ${hasRisks ? "border-red-200 bg-red-50/30" : ""}`}>
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-red-100">
+        <AlertOctagon className={`w-4 h-4 ${hasRisks ? "text-red-500" : "text-slate-400"}`} />
+        <h3 className="text-sm font-semibold text-slate-700">Critical Disqualification Risks</h3>
+        <span className={`ml-auto text-xs font-bold px-2.5 py-0.5 rounded-full border ${
+          hasRisks
+            ? "text-red-600 bg-red-50 border-red-200"
+            : "text-slate-400 bg-slate-100 border-slate-200"
+        }`}>
+          {items.length} {items.length === 1 ? "risk" : "risks"}
+        </span>
+      </div>
+
+      {/* No risks state */}
+      {!hasRisks && (
+        <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-200">
+          <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0" />
+          <p className="text-sm font-medium text-emerald-700">
+            No immediate disqualification risks detected.
+          </p>
+        </div>
+      )}
+
+      {/* Risk cards */}
+      {hasRisks && (
+        <div className="overflow-y-auto max-h-96 -mr-1 pr-1 space-y-3">
+          {items.map((risk, i) => {
+            const hasSection = risk.section && risk.section !== "Not Specified";
+            return (
+              <div
+                key={i}
+                className="flex items-start gap-3 p-4 rounded-xl bg-red-50 border border-red-200"
+              >
+                {/* Icon + number */}
+                <div className="flex flex-col items-center gap-1 shrink-0">
+                  <div className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center">
+                    <span className="text-[10px] font-bold text-white">{i + 1}</span>
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-red-800 leading-snug">{risk.name}</p>
+                  {hasSection && (
+                    <div className="flex items-center gap-1 mt-1.5">
+                      <BookOpen className="w-3 h-3 text-red-400 shrink-0" />
+                      <p className="text-xs text-red-500">{risk.section}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Warning badge */}
+                <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-300 uppercase tracking-wide">
+                  Critical
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Remaining placeholder building blocks ────────────────────────────────────
 
 function SectionCard({ icon: Icon, title, children }) {
@@ -919,6 +991,9 @@ export default function TenderReadinessDashboard() {
 
           {/* ── Evaluation Criteria ── */}
           <EvaluationCriteriaSection ec={analysis.evaluationCriteria || {}} />
+
+          {/* ── Critical Disqualification Risks ── */}
+          <DisqualificationRisksSection items={analysis.disqualificationRisks || []} />
         </>
       )}
 
