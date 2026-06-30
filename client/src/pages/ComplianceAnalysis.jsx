@@ -369,15 +369,114 @@ function CompanyDocumentsSection({ docs }) {
   );
 }
 
-// ── Required Documents table ──────────────────────────────────────────────────
-function RequiredDocumentsTable({ tenderData }) {
-  const items = tenderData?.analysis?.requiredDocuments || [];
+// ── Compliance matching engine ────────────────────────────────────────────────
+
+// High-signal acronyms and keywords that uniquely identify a document type
+const HIGH_SIGNAL = [
+  "cac","pencom","nsitf","itf","firs","tax","bpp","nafdac","son","ncc","npc",
+  "iso","nis","coren","toprec","naoc","naddc","dpr","nesrea","nnpc","cbn",
+  "smedan","nipc","immigration","customs","police","sec","nse","lasimra",
+  "bid","bond","security","guarantee","irrevocable","letter","insurance",
+  "indemnity","professional","profile","experience","audited","financial",
+  "incorporation","registration","annual","turnover","statement","joint",
+  "venture","power","attorney","sworn","affidavit","certificate",
+];
+
+const STOPWORDS = new Set([
+  "a","an","the","of","for","and","or","in","on","to","with","by","at",
+  "is","are","be","been","as","from","that","this","must","shall","will",
+  "not","all","any","each","no","its","it","has","have","been","been",
+  "copy","copies","valid","current","original","certified","true","duly",
+  "signed","stamped","dated","recent","year","years","three","two","one",
+  "per","their","submitted","submit","provide","provided","evidence","proof",
+]);
+
+function tokenise(str) {
+  return (str || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 1 && !STOPWORDS.has(t));
+}
+
+// Returns a confidence score 0–N for how well companyDoc matches requiredName
+function matchScore(requiredTokens, companyDoc) {
+  const haystack = tokenise(`${companyDoc.name} ${companyDoc.type}`);
+  let score = 0;
+  for (const tok of requiredTokens) {
+    if (haystack.includes(tok)) {
+      score += HIGH_SIGNAL.includes(tok) ? 3 : 1;
+    } else if (haystack.some((h) => h.includes(tok) || tok.includes(h))) {
+      score += HIGH_SIGNAL.includes(tok) ? 1.5 : 0.5;
+    }
+  }
+  return score;
+}
+
+// COMPLIANCE_STATUS values: Available | Missing | Expired | Expiring Soon | Cannot Determine
+function matchDocumentStatus(requiredDoc, companyDocs) {
+  if (!companyDocs || companyDocs.length === 0) return "Missing";
+
+  const tokens = tokenise(requiredDoc.name);
+  if (tokens.length === 0) return "Cannot Determine";
+
+  // Score every company doc
+  const scored = companyDocs
+    .map((d) => ({ doc: d, score: matchScore(tokens, d) }))
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (scored.length === 0) return "Missing";
+
+  const best = scored[0];
+
+  // Require a minimum confidence before calling it a match
+  const minScore = tokens.some((t) => HIGH_SIGNAL.includes(t)) ? 2 : 2.5;
+
+  if (best.score < minScore) return "Cannot Determine";
+
+  // Match found — check expiry
+  const expiry = best.doc.expiryDate;
+  if (!expiry) return "Available"; // no expiry tracked = treat as valid
+
+  const days = Math.ceil((new Date(expiry) - new Date()) / (1000 * 60 * 60 * 24));
+  if (days < 0)   return "Expired";
+  if (days <= 30) return "Expiring Soon";
+  return "Available";
+}
+
+const COMPLIANCE_BADGE = {
+  "Available":        { cls: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500", icon: "✓" },
+  "Missing":          { cls: "bg-red-50 text-red-600 border-red-200",             dot: "bg-red-500",     icon: "✗" },
+  "Expired":          { cls: "bg-rose-50 text-rose-700 border-rose-200",          dot: "bg-rose-500",    icon: "!" },
+  "Expiring Soon":    { cls: "bg-amber-50 text-amber-700 border-amber-200",       dot: "bg-amber-400",   icon: "⚠" },
+  "Cannot Determine": { cls: "bg-slate-100 text-slate-500 border-slate-200",      dot: "bg-slate-400",   icon: "?" },
+};
+
+// ── Required Documents table (with compliance matching) ───────────────────────
+function RequiredDocumentsTable({ tenderData, docs }) {
+  const items     = tenderData?.analysis?.requiredDocuments || [];
   const mandatory = items.filter((d) => d.mandatory === true || d.mandatory === "true");
   const optional  = items.filter((d) => d.mandatory !== true && d.mandatory !== "true");
 
+  // Pre-compute compliance status for every item
+  const withStatus = items.map((doc) => ({
+    ...doc,
+    complianceStatus: matchDocumentStatus(doc, docs),
+  }));
+  const mandatoryWithStatus = withStatus.filter((d) => d.mandatory === true || d.mandatory === "true");
+  const optionalWithStatus  = withStatus.filter((d) => d.mandatory !== true && d.mandatory !== "true");
+
+  // Counts for summary strip
+  const available  = withStatus.filter((d) => d.complianceStatus === "Available").length;
+  const missing    = withStatus.filter((d) => d.complianceStatus === "Missing").length;
+  const expired    = withStatus.filter((d) => d.complianceStatus === "Expired").length;
+  const expiring   = withStatus.filter((d) => d.complianceStatus === "Expiring Soon").length;
+  const unclear    = withStatus.filter((d) => d.complianceStatus === "Cannot Determine").length;
+
   if (!tenderData) {
     return (
-      <SectionCard icon={FileText} title="Required Documents" subtitle="Loaded from AI Tender Analysis" color="blue">
+      <SectionCard icon={FileText} title="Document Compliance Match" subtitle="Required documents vs. your uploads" color="blue">
         <div className="text-center py-10 space-y-2">
           <FileText className="w-10 h-10 text-slate-200 mx-auto" />
           <p className="text-sm text-slate-400">No tender analysis found.</p>
@@ -389,7 +488,7 @@ function RequiredDocumentsTable({ tenderData }) {
 
   if (items.length === 0) {
     return (
-      <SectionCard icon={FileText} title="Required Documents" subtitle="Loaded from AI Tender Analysis" color="blue">
+      <SectionCard icon={FileText} title="Document Compliance Match" subtitle="Required documents vs. your uploads" color="blue">
         <div className="text-center py-10 space-y-2">
           <CheckCircle2 className="w-10 h-10 text-slate-200 mx-auto" />
           <p className="text-sm text-slate-400">No required documents were extracted for this tender.</p>
@@ -401,9 +500,18 @@ function RequiredDocumentsTable({ tenderData }) {
   function DocRow({ doc, index }) {
     const isMandatory = doc.mandatory === true || doc.mandatory === "true";
     const hasSection  = doc.section && doc.section !== "Not Specified";
+    const badge       = COMPLIANCE_BADGE[doc.complianceStatus] || COMPLIANCE_BADGE["Cannot Determine"];
+
+    // Row background tint based on compliance status
+    const rowBg =
+      doc.complianceStatus === "Available"     ? "hover:bg-emerald-50/40" :
+      doc.complianceStatus === "Missing"       ? "bg-red-50/30 hover:bg-red-50/50 border-red-100/60" :
+      doc.complianceStatus === "Expired"       ? "bg-rose-50/30 hover:bg-rose-50/50 border-rose-100/60" :
+      doc.complianceStatus === "Expiring Soon" ? "bg-amber-50/30 hover:bg-amber-50/50 border-amber-100/60" :
+      "hover:bg-slate-50";
 
     return (
-      <div className="grid grid-cols-[2rem_1fr_auto_auto] sm:grid-cols-[2rem_1fr_140px_180px] gap-3 items-start px-4 py-3 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+      <div className={`grid grid-cols-[2rem_1fr_auto] sm:grid-cols-[2rem_1fr_110px_150px_160px] gap-3 items-start px-4 py-3 rounded-xl transition-colors border border-transparent ${rowBg}`}>
         {/* Row number */}
         <span className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 mt-0.5">
           {index + 1}
@@ -412,10 +520,16 @@ function RequiredDocumentsTable({ tenderData }) {
         {/* Document name */}
         <div className="min-w-0">
           <p className="text-sm font-semibold text-slate-800 leading-snug">{doc.name}</p>
+          {hasSection && (
+            <span className="inline-flex items-center gap-1 text-xs text-violet-500 mt-0.5">
+              <BookOpen className="w-2.5 h-2.5 shrink-0" />
+              <span className="truncate max-w-[200px]" title={doc.section}>{doc.section}</span>
+            </span>
+          )}
         </div>
 
-        {/* Mandatory status */}
-        <div className="flex justify-start sm:justify-center">
+        {/* Mandatory — hidden on mobile, shown on sm+ */}
+        <div className="hidden sm:flex justify-center">
           {isMandatory ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-50 text-red-600 border border-red-200 whitespace-nowrap">
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
@@ -429,16 +543,12 @@ function RequiredDocumentsTable({ tenderData }) {
           )}
         </div>
 
-        {/* Section reference */}
-        <div className="flex items-start gap-1 min-w-0">
-          {hasSection ? (
-            <span className="inline-flex items-center gap-1 text-xs text-violet-600 font-medium bg-violet-50 border border-violet-100 px-2 py-0.5 rounded-lg truncate max-w-[160px]" title={doc.section}>
-              <BookOpen className="w-3 h-3 shrink-0" />
-              <span className="truncate">{doc.section}</span>
-            </span>
-          ) : (
-            <span className="text-xs text-slate-300 italic">—</span>
-          )}
+        {/* Compliance status — always visible */}
+        <div className="sm:col-span-1 col-span-1 flex justify-end sm:justify-center">
+          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border whitespace-nowrap ${badge.cls}`}>
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${badge.dot}`} />
+            {doc.complianceStatus}
+          </span>
         </div>
       </div>
     );
@@ -446,72 +556,76 @@ function RequiredDocumentsTable({ tenderData }) {
 
   return (
     <SectionCard
-      icon={FileText}
-      title="Required Documents"
-      subtitle="Extracted from AI Tender Analysis — no comparison yet"
-      badge={`${items.length} documents`}
+      icon={ShieldCheck}
+      title="Document Compliance Match"
+      subtitle="Each tender requirement checked against your uploaded documents"
+      badge={`${items.length} requirements`}
       color="blue"
     >
-      {/* Stats strip */}
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-center">
-          <p className="text-xl font-extrabold text-slate-800">{items.length}</p>
-          <p className="text-xs text-slate-400 font-medium mt-0.5">Total</p>
-        </div>
-        <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-center">
-          <p className="text-xl font-extrabold text-red-600">{mandatory.length}</p>
-          <p className="text-xs text-red-500 font-medium mt-0.5">Mandatory</p>
-        </div>
-        <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-center">
-          <p className="text-xl font-extrabold text-slate-500">{optional.length}</p>
-          <p className="text-xs text-slate-400 font-medium mt-0.5">Optional</p>
-        </div>
+      {/* Compliance summary strip */}
+      <div className="grid grid-cols-5 gap-2 mb-4">
+        {[
+          { label: "Available",        n: available, cls: "bg-emerald-50 border-emerald-100 text-emerald-600" },
+          { label: "Missing",          n: missing,   cls: "bg-red-50 border-red-100 text-red-600"             },
+          { label: "Expired",          n: expired,   cls: "bg-rose-50 border-rose-100 text-rose-700"          },
+          { label: "Expiring Soon",    n: expiring,  cls: "bg-amber-50 border-amber-100 text-amber-600"       },
+          { label: "Unverified",       n: unclear,   cls: "bg-slate-50 border-slate-100 text-slate-500"       },
+        ].map(({ label, n, cls }) => (
+          <div key={label} className={`p-2 sm:p-3 rounded-xl border text-center ${cls}`}>
+            <p className="text-lg sm:text-xl font-extrabold leading-none">{n}</p>
+            <p className="text-[10px] sm:text-xs font-medium mt-0.5 leading-tight">{label}</p>
+          </div>
+        ))}
       </div>
 
       {/* Column headers */}
-      <div className="grid grid-cols-[2rem_1fr_auto_auto] sm:grid-cols-[2rem_1fr_140px_180px] gap-3 px-4 py-2 mb-1">
+      <div className="hidden sm:grid grid-cols-[2rem_1fr_110px_150px_160px] gap-3 px-4 py-2">
         <span />
         <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Document Name</span>
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wide text-left sm:text-center">Status</span>
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Section Ref.</span>
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wide text-center">Required</span>
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wide text-center">Compliance</span>
       </div>
-
-      {/* Divider */}
       <div className="h-px bg-slate-100 mb-1" />
 
       {/* Rows — scrollable */}
-      <div className="max-h-[480px] overflow-y-auto pr-1 space-y-0.5">
+      <div className="max-h-[500px] overflow-y-auto pr-1 space-y-0.5">
         {/* Mandatory group */}
-        {mandatory.length > 0 && (
+        {mandatoryWithStatus.length > 0 && (
           <>
             <p className="text-xs font-bold text-red-500 uppercase tracking-wide px-4 py-2">
-              Mandatory ({mandatory.length})
+              Mandatory ({mandatoryWithStatus.length})
             </p>
-            {mandatory.map((doc, i) => (
+            {mandatoryWithStatus.map((doc, i) => (
               <DocRow key={`m-${i}`} doc={doc} index={i} />
             ))}
           </>
         )}
 
         {/* Optional group */}
-        {optional.length > 0 && (
+        {optionalWithStatus.length > 0 && (
           <>
             <div className="h-px bg-slate-100 my-2" />
             <p className="text-xs font-bold text-slate-400 uppercase tracking-wide px-4 py-2">
-              Optional ({optional.length})
+              Optional ({optionalWithStatus.length})
             </p>
-            {optional.map((doc, i) => (
-              <DocRow key={`o-${i}`} doc={doc} index={mandatory.length + i} />
+            {optionalWithStatus.map((doc, i) => (
+              <DocRow key={`o-${i}`} doc={doc} index={mandatoryWithStatus.length + i} />
             ))}
           </>
         )}
       </div>
 
-      {/* Footer note */}
-      <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2">
-        <Cpu className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+      {/* Legend + note */}
+      <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+        <div className="flex flex-wrap gap-2">
+          {Object.entries(COMPLIANCE_BADGE).map(([label, { cls, dot }]) => (
+            <span key={label} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${cls}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />{label}
+            </span>
+          ))}
+        </div>
         <p className="text-xs text-slate-400">
-          Comparison against your uploaded documents will be added when the Compliance Engine runs.
+          <span className="font-semibold text-slate-500">Unverified</span> means the document name was too generic to match confidently. Review manually.
         </p>
       </div>
     </SectionCard>
@@ -747,7 +861,7 @@ export default function ComplianceAnalysis() {
       <CompanyDocumentsSection docs={docs} />
 
       {/* Required Documents — full width */}
-      <RequiredDocumentsTable tenderData={tenderData} />
+      <RequiredDocumentsTable tenderData={tenderData} docs={docs} />
 
       {/* Compliance Results — full width */}
       <ComplianceResultsSection />
