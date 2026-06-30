@@ -23,6 +23,7 @@ import {
   DollarSign,
   ListChecks,
   Zap,
+  BookOpen,
 } from "lucide-react";
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
@@ -247,6 +248,155 @@ function TenderRequirementsSection({ tenderData }) {
           <p className="text-xs text-slate-300">Run the Tender Analyzer first, then return here.</p>
         </div>
       )}
+    </SectionCard>
+  );
+}
+
+// ── Required Documents table ──────────────────────────────────────────────────
+function RequiredDocumentsTable({ tenderData }) {
+  const items = tenderData?.analysis?.requiredDocuments || [];
+  const mandatory = items.filter((d) => d.mandatory === true || d.mandatory === "true");
+  const optional  = items.filter((d) => d.mandatory !== true && d.mandatory !== "true");
+
+  if (!tenderData) {
+    return (
+      <SectionCard icon={FileText} title="Required Documents" subtitle="Loaded from AI Tender Analysis" color="blue">
+        <div className="text-center py-10 space-y-2">
+          <FileText className="w-10 h-10 text-slate-200 mx-auto" />
+          <p className="text-sm text-slate-400">No tender analysis found.</p>
+          <p className="text-xs text-slate-300">Run the Tender Analyzer first, then return here.</p>
+        </div>
+      </SectionCard>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <SectionCard icon={FileText} title="Required Documents" subtitle="Loaded from AI Tender Analysis" color="blue">
+        <div className="text-center py-10 space-y-2">
+          <CheckCircle2 className="w-10 h-10 text-slate-200 mx-auto" />
+          <p className="text-sm text-slate-400">No required documents were extracted for this tender.</p>
+        </div>
+      </SectionCard>
+    );
+  }
+
+  function DocRow({ doc, index }) {
+    const isMandatory = doc.mandatory === true || doc.mandatory === "true";
+    const hasSection  = doc.section && doc.section !== "Not Specified";
+
+    return (
+      <div className="grid grid-cols-[2rem_1fr_auto_auto] sm:grid-cols-[2rem_1fr_140px_180px] gap-3 items-start px-4 py-3 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100">
+        {/* Row number */}
+        <span className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500 shrink-0 mt-0.5">
+          {index + 1}
+        </span>
+
+        {/* Document name */}
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-slate-800 leading-snug">{doc.name}</p>
+        </div>
+
+        {/* Mandatory status */}
+        <div className="flex justify-start sm:justify-center">
+          {isMandatory ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-red-50 text-red-600 border border-red-200 whitespace-nowrap">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+              Mandatory
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0" />
+              Optional
+            </span>
+          )}
+        </div>
+
+        {/* Section reference */}
+        <div className="flex items-start gap-1 min-w-0">
+          {hasSection ? (
+            <span className="inline-flex items-center gap-1 text-xs text-violet-600 font-medium bg-violet-50 border border-violet-100 px-2 py-0.5 rounded-lg truncate max-w-[160px]" title={doc.section}>
+              <BookOpen className="w-3 h-3 shrink-0" />
+              <span className="truncate">{doc.section}</span>
+            </span>
+          ) : (
+            <span className="text-xs text-slate-300 italic">—</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <SectionCard
+      icon={FileText}
+      title="Required Documents"
+      subtitle="Extracted from AI Tender Analysis — no comparison yet"
+      badge={`${items.length} documents`}
+      color="blue"
+    >
+      {/* Stats strip */}
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-center">
+          <p className="text-xl font-extrabold text-slate-800">{items.length}</p>
+          <p className="text-xs text-slate-400 font-medium mt-0.5">Total</p>
+        </div>
+        <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-center">
+          <p className="text-xl font-extrabold text-red-600">{mandatory.length}</p>
+          <p className="text-xs text-red-500 font-medium mt-0.5">Mandatory</p>
+        </div>
+        <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-center">
+          <p className="text-xl font-extrabold text-slate-500">{optional.length}</p>
+          <p className="text-xs text-slate-400 font-medium mt-0.5">Optional</p>
+        </div>
+      </div>
+
+      {/* Column headers */}
+      <div className="grid grid-cols-[2rem_1fr_auto_auto] sm:grid-cols-[2rem_1fr_140px_180px] gap-3 px-4 py-2 mb-1">
+        <span />
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Document Name</span>
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wide text-left sm:text-center">Status</span>
+        <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Section Ref.</span>
+      </div>
+
+      {/* Divider */}
+      <div className="h-px bg-slate-100 mb-1" />
+
+      {/* Rows — scrollable */}
+      <div className="max-h-[480px] overflow-y-auto pr-1 space-y-0.5">
+        {/* Mandatory group */}
+        {mandatory.length > 0 && (
+          <>
+            <p className="text-xs font-bold text-red-500 uppercase tracking-wide px-4 py-2">
+              Mandatory ({mandatory.length})
+            </p>
+            {mandatory.map((doc, i) => (
+              <DocRow key={`m-${i}`} doc={doc} index={i} />
+            ))}
+          </>
+        )}
+
+        {/* Optional group */}
+        {optional.length > 0 && (
+          <>
+            <div className="h-px bg-slate-100 my-2" />
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wide px-4 py-2">
+              Optional ({optional.length})
+            </p>
+            {optional.map((doc, i) => (
+              <DocRow key={`o-${i}`} doc={doc} index={mandatory.length + i} />
+            ))}
+          </>
+        )}
+      </div>
+
+      {/* Footer note */}
+      <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2">
+        <Cpu className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+        <p className="text-xs text-slate-400">
+          Comparison against your uploaded documents will be added when the Compliance Engine runs.
+        </p>
+      </div>
     </SectionCard>
   );
 }
@@ -476,10 +626,13 @@ export default function ComplianceAnalysis() {
         <ReadinessScoreSection />
       </div>
 
-      {/* 3. Compliance Results — full width */}
+      {/* Required Documents — full width */}
+      <RequiredDocumentsTable tenderData={tenderData} />
+
+      {/* Compliance Results — full width */}
       <ComplianceResultsSection />
 
-      {/* 5. Action Plan — full width */}
+      {/* Action Plan — full width */}
       <ActionPlanSection />
 
       {/* ── Footer CTA ── */}
