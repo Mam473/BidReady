@@ -21,6 +21,9 @@ import {
   DollarSign,
   Minus,
   Users,
+  Wrench,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -486,6 +489,148 @@ function PersonnelRequirementsTable({ items = [] }) {
   );
 }
 
+// ── Equipment Requirements table ──────────────────────────────────────────────
+
+function parseEquipment(item) {
+  const text = item.name || "";
+  const lower = text.toLowerCase();
+
+  // ── Equipment Name: everything before the first comma, parenthesis, colon, or digit quantity
+  const nameMatch = text.match(/^([^,(:\d]+?)(?:\s*[,(:–-]|\s+\d|\s+(?:minimum|min|at least|owned|leased|lease)|$)/i);
+  const equipmentName = nameMatch ? nameMatch[1].trim() : text.trim();
+
+  // ── Quantity: digits preceded/followed by quantity indicators
+  const qtyMatch = lower.match(
+    /(\d+)\s*(?:no\.?s?|units?|sets?|pieces?|nos?\.?|vehicles?|machines?)|(?:minimum|min\.?|at\s+least)\s+(\d+)/i
+  );
+  const quantity = qtyMatch ? (qtyMatch[1] || qtyMatch[2]) : "—";
+
+  // ── Ownership requirement
+  const ownsRx = /\b(own(?:ed|ership)?|outright\s+ownership|company.?owned|must\s+own|proof\s+of\s+ownership)\b/i;
+  const ownership = ownsRx.test(lower) ? "Owned" : "—";
+
+  // ── Lease allowed
+  const leaseRx  = /\b(lease[d]?|rent(?:ed)?|hir(?:ed)?|access|available|sourced?)\b/i;
+  const leaseAllowed = leaseRx.test(lower)
+    ? "Yes"
+    : ownership === "Owned"
+    ? "No"
+    : "—";
+
+  return { equipmentName, quantity, ownership, leaseAllowed, section: item.section };
+}
+
+const EQUIPMENT_COLS = [
+  { key: "equipmentName", label: "Equipment Name",        width: "min-w-[180px]" },
+  { key: "quantity",      label: "Quantity",               width: "min-w-[90px]"  },
+  { key: "ownership",     label: "Ownership Requirement",  width: "min-w-[150px]" },
+  { key: "leaseAllowed",  label: "Lease Allowed",          width: "min-w-[110px]" },
+];
+
+function EquipmentCell({ col, value }) {
+  const isEmpty = !value || value === "—";
+
+  if (col === "leaseAllowed" && !isEmpty) {
+    return (
+      <td className="px-4 py-3 text-sm align-top">
+        {value === "Yes"
+          ? <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold"><CheckCircle2 className="w-3.5 h-3.5" /> Yes</span>
+          : <span className="inline-flex items-center gap-1 text-red-500 font-semibold"><XCircle className="w-3.5 h-3.5" /> No</span>
+        }
+      </td>
+    );
+  }
+  if (col === "ownership" && !isEmpty) {
+    return (
+      <td className="px-4 py-3 text-sm align-top">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-orange-50 text-orange-700 border border-orange-200">
+          {value}
+        </span>
+      </td>
+    );
+  }
+  return (
+    <td className="px-4 py-3 text-sm align-top">
+      {isEmpty
+        ? <span className="text-slate-300 italic">—</span>
+        : <span className="text-slate-800 font-medium">{value}</span>
+      }
+    </td>
+  );
+}
+
+function EquipmentRequirementsTable({ items = [] }) {
+  if (items.length === 0) {
+    return (
+      <div className="card p-5">
+        <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+          <Wrench className="w-4 h-4 text-orange-500" />
+          <h3 className="text-sm font-semibold text-slate-700">Equipment Requirements</h3>
+          <span className="ml-auto text-xs font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">0</span>
+        </div>
+        <p className="text-sm text-slate-400 italic">No equipment requirements found in the analysis.</p>
+      </div>
+    );
+  }
+
+  const rows = items.map(parseEquipment);
+
+  return (
+    <div className="card p-5">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+        <Wrench className="w-4 h-4 text-orange-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Equipment Requirements</h3>
+        <span className="ml-auto text-xs font-bold text-orange-600 bg-orange-50 border border-orange-100 px-2.5 py-0.5 rounded-full">
+          {items.length}
+        </span>
+      </div>
+
+      {/* Scrollable table */}
+      <div className="overflow-x-auto overflow-y-auto max-h-96 rounded-xl border border-slate-100">
+        <table className="w-full text-left border-collapse">
+          <thead className="sticky top-0 bg-slate-50 z-10">
+            <tr>
+              {EQUIPMENT_COLS.map(({ key, label, width }) => (
+                <th
+                  key={key}
+                  className={`px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-100 ${width}`}
+                >
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {rows.map((row, i) => (
+              <tr key={i} className="hover:bg-orange-50/30 transition-colors">
+                {EQUIPMENT_COLS.map(({ key }) => (
+                  <EquipmentCell key={key} col={key} value={row[key]} />
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Section references */}
+      {rows.some((r) => r.section && r.section !== "Not Specified") && (
+        <div className="mt-3 space-y-1">
+          {rows.map((row, i) =>
+            row.section && row.section !== "Not Specified" ? (
+              <div key={i} className="flex items-center gap-1.5 text-xs text-slate-400">
+                <BookOpen className="w-3 h-3 shrink-0" />
+                <span className="font-medium text-slate-500">{row.equipmentName}:</span>
+                <span>{row.section}</span>
+              </div>
+            ) : null
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Remaining placeholder building blocks ────────────────────────────────────
 
 function SectionCard({ icon: Icon, title, children }) {
@@ -658,6 +803,9 @@ export default function TenderReadinessDashboard() {
 
           {/* ── Personnel Requirements table ── */}
           <PersonnelRequirementsTable items={analysis.personnelRequirements || []} />
+
+          {/* ── Equipment Requirements table ── */}
+          <EquipmentRequirementsTable items={analysis.equipmentRequirements || []} />
         </>
       )}
 
