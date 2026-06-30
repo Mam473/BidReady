@@ -16,12 +16,13 @@ import {
 import ChatWidget from "./ChatWidget.jsx";
 
 const NAV_ITEMS = [
-  { to: "/documents",        icon: FolderOpen,     label: "Documents"      },
-  { to: "/tenders",          icon: FileText,        label: "Tenders"        },
-  { to: "/tender-analyzer",  icon: ScanSearch,      label: "Tender Analyzer" },
-  { to: "/analysis",         icon: BarChart3,       label: "Analysis"       },
-  { to: "/pricing",          icon: CreditCard,      label: "Pricing"        },
-  { to: "/admin",            icon: LayoutDashboard, label: "Admin"          },
+  { to: "/documents",        icon: FolderOpen,     label: "Documents"           },
+  { to: "/tenders",          icon: FileText,        label: "Tenders"             },
+  { to: "/tender-analyzer",  icon: ScanSearch,      label: "Tender Analyzer"     },
+  { to: "/tender-readiness", icon: Gauge,           label: "Readiness Dashboard" },
+  { to: "/analysis",         icon: BarChart3,       label: "Analysis"            },
+  { to: "/pricing",          icon: CreditCard,      label: "Pricing"             },
+  { to: "/admin",            icon: LayoutDashboard, label: "Admin"               },
 ];
 
 function NavItem({ to, icon: Icon, label, onClick }) {

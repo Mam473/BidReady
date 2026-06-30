@@ -35,6 +35,7 @@ export default function App() {
           <Route path="documents" element={<Documents />} />
           <Route path="tenders" element={<Tenders />} />
           <Route path="tender-analyzer" element={<TenderAnalyzer />} />
+          <Route path="tender-readiness" element={<TenderReadinessDashboard />} />
           <Route path="analysis" element={<Analysis />} />
           <Route path="pricing" element={<Pricing />} />
           <Route path="admin" element={<Admin />} />
