@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   FileCheck2,
   CalendarClock,
@@ -24,6 +24,9 @@ import {
   Wrench,
   CheckCircle2,
   XCircle,
+  BarChart3,
+  ListChecks,
+  Trophy,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -631,6 +634,113 @@ function EquipmentRequirementsTable({ items = [] }) {
   );
 }
 
+// ── Evaluation Criteria section ───────────────────────────────────────────────
+
+const EVAL_TABS = [
+  { key: "administrativeEvaluation", label: "Administrative", short: "Admin",     icon: ListChecks },
+  { key: "technicalEvaluation",      label: "Technical",      short: "Technical", icon: BarChart3  },
+  { key: "financialEvaluation",      label: "Financial",      short: "Financial", icon: DollarSign },
+  { key: "passMark",                 label: "Pass Mark",      short: "Pass Mark", icon: Trophy     },
+  { key: "weightedScores",           label: "Weighted Scores",short: "Weighted",  icon: BarChart3  },
+];
+
+function EvalItemRow({ item, showWeight }) {
+  const hasSection = item.section && item.section !== "Not Specified";
+  const hasWeight  = showWeight && item.weight && item.weight !== "Not Specified";
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-xl border border-slate-100 hover:border-teal-200 hover:bg-teal-50/20 transition-colors">
+      <BarChart3 className="w-4 h-4 text-teal-400 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-800 leading-snug">{item.name}</p>
+        {hasSection && (
+          <div className="flex items-center gap-1 mt-1">
+            <BookOpen className="w-3 h-3 text-slate-400 shrink-0" />
+            <p className="text-xs text-slate-400 truncate">{item.section}</p>
+          </div>
+        )}
+      </div>
+      {hasWeight && (
+        <span className="shrink-0 text-xs font-bold px-2.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
+          {item.weight}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function EvaluationCriteriaSection({ ec = {} }) {
+  const [activeTab, setActiveTab] = useState(0);
+
+  const tabs = EVAL_TABS.map((t) => ({
+    ...t,
+    items: ec[t.key] || [],
+  }));
+
+  const totalItems = tabs.reduce((n, t) => n + t.items.length, 0);
+  const active = tabs[activeTab];
+  const showWeight = active.key === "technicalEvaluation"
+    || active.key === "financialEvaluation"
+    || active.key === "weightedScores";
+
+  return (
+    <div className="card p-5">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+        <BarChart3 className="w-4 h-4 text-teal-500" />
+        <h3 className="text-sm font-semibold text-slate-700">Evaluation Criteria</h3>
+        {totalItems > 0 && (
+          <span className="ml-auto text-xs font-bold text-teal-600 bg-teal-50 border border-teal-100 px-2.5 py-0.5 rounded-full">
+            {totalItems} criteria
+          </span>
+        )}
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 overflow-x-auto pb-1 mb-4 -mx-1 px-1">
+        {tabs.map((tab, i) => {
+          const Icon = tab.icon;
+          const isActive = i === activeTab;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(i)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors shrink-0 ${
+                isActive
+                  ? "bg-teal-500 text-white shadow-sm"
+                  : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+              }`}
+            >
+              <Icon className="w-3 h-3" />
+              <span className="hidden sm:inline">{tab.label}</span>
+              <span className="sm:hidden">{tab.short}</span>
+              {tab.items.length > 0 && (
+                <span className={`ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  isActive ? "bg-white/25 text-white" : "bg-slate-200 text-slate-500"
+                }`}>
+                  {tab.items.length}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab content */}
+      {active.items.length === 0 ? (
+        <p className="text-sm text-slate-400 italic">
+          No {active.label.toLowerCase()} criteria found in the analysis.
+        </p>
+      ) : (
+        <div className="overflow-y-auto max-h-80 -mr-1 pr-1 space-y-2">
+          {active.items.map((item, i) => (
+            <EvalItemRow key={i} item={item} showWeight={showWeight} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Remaining placeholder building blocks ────────────────────────────────────
 
 function SectionCard({ icon: Icon, title, children }) {
@@ -806,6 +916,9 @@ export default function TenderReadinessDashboard() {
 
           {/* ── Equipment Requirements table ── */}
           <EquipmentRequirementsTable items={analysis.equipmentRequirements || []} />
+
+          {/* ── Evaluation Criteria ── */}
+          <EvaluationCriteriaSection ec={analysis.evaluationCriteria || {}} />
         </>
       )}
 
