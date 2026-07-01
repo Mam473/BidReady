@@ -656,33 +656,32 @@ function RequiredDocumentsTable({ tenderData, docs }) {
 
 // ── 3. Compliance Results ─────────────────────────────────────────────────────
 const RESULT_CATEGORIES = [
-  { icon: FileText,    label: "Documents",   desc: "Required vs. uploaded documents matched", color: "text-green-500",  bg: "bg-green-50  border-green-100"  },
-  { icon: ListChecks,  label: "Eligibility", desc: "Registration, certifications & licences",  color: "text-blue-500",  bg: "bg-blue-50   border-blue-100"   },
-  { icon: DollarSign,  label: "Financial",   desc: "Turnover, bonding & insurance thresholds",  color: "text-amber-500", bg: "bg-amber-50  border-amber-100"  },
-  { icon: Users,       label: "Personnel",   desc: "Key staff roles vs. CV database",          color: "text-indigo-500",bg: "bg-indigo-50 border-indigo-100" },
-  { icon: Wrench,      label: "Equipment",   desc: "Owned & leased assets vs. requirements",   color: "text-orange-500",bg: "bg-orange-50 border-orange-100" },
+  { icon: FileText,   label: "Documents",   desc: "Tender document requirements vs. uploaded files"  },
+  { icon: ListChecks, label: "Eligibility", desc: "Registration, certifications & licences"          },
+  { icon: DollarSign, label: "Financial",   desc: "Turnover, bonding & insurance thresholds"         },
+  { icon: Users,      label: "Personnel",   desc: "Key staff roles and qualifications"                },
+  { icon: Wrench,     label: "Equipment",   desc: "Owned and leased asset requirements"               },
 ];
 
 function ComplianceResultsSection() {
   return (
-    <SectionCard icon={ShieldCheck} title="Compliance Results" subtitle="Per-category match analysis" color="emerald">
-      <div className="space-y-3">
-        {RESULT_CATEGORIES.map(({ icon: Icon, label, desc, color, bg }) => (
-          <div key={label} className={`flex items-center gap-3 p-3 rounded-xl border ${bg}`}>
-            <Icon className={`w-4 h-4 shrink-0 ${color}`} />
+    <SectionCard icon={ShieldCheck} title="Compliance Results" subtitle="Category-by-category match analysis" color="emerald">
+      <div className="space-y-2">
+        {RESULT_CATEGORIES.map(({ icon: Icon, label, desc }) => (
+          <div key={label} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-100 bg-slate-50">
+            <Icon className="w-4 h-4 text-slate-400 shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <p className="text-sm font-semibold text-slate-700">{label}</p>
-                <ComingSoonBadge />
-              </div>
-              <p className="text-xs text-slate-400 truncate">{desc}</p>
-              {/* Placeholder progress bar */}
-              <div className="mt-2 h-1.5 rounded-full bg-white/80 border border-slate-200 overflow-hidden">
-                <div className="h-full w-0 rounded-full bg-slate-200 animate-pulse" />
-              </div>
+              <p className="text-sm font-semibold text-slate-600">{label}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{desc}</p>
             </div>
+            <span className="text-xs text-slate-400 italic shrink-0">Awaiting analysis</span>
           </div>
         ))}
+      </div>
+      <div className="mt-4 flex items-center justify-center py-5 rounded-xl border border-dashed border-slate-200 bg-white">
+        <p className="text-xs text-slate-400 text-center max-w-sm px-4">
+          Upload your EOI, ITT, or compliance files to begin live matching analysis
+        </p>
       </div>
     </SectionCard>
   );
@@ -692,12 +691,41 @@ function ComplianceResultsSection() {
 const GAUGE_R = 54;
 const GAUGE_CIRC = 2 * Math.PI * GAUGE_R;
 
-function ReadinessScoreSection() {
-  const score  = 82;
+function computeReadinessScore(tenderData, docs) {
+  const items = tenderData?.analysis?.requiredDocuments || [];
+  const mandatory = items.filter(d => d.mandatory === true || d.mandatory === "true");
+  const pool = mandatory.length > 0 ? mandatory : items;
+
+  if (pool.length === 0 || docs.length === 0) {
+    return { score: 0, status: "Not Ready", available: 0, expiring: 0, missing: pool.length, expired: 0, unclear: 0, total: pool.length };
+  }
+
+  const statuses = pool.map(doc => matchDocumentStatus(doc, docs));
+  const available = statuses.filter(s => s === "Available").length;
+  const expiring  = statuses.filter(s => s === "Expiring Soon").length;
+  const missing   = statuses.filter(s => s === "Missing").length;
+  const expired   = statuses.filter(s => s === "Expired").length;
+  const unclear   = statuses.filter(s => s === "Cannot Determine").length;
+  const points    = available + expiring * 0.5;
+  const score     = Math.round((points / pool.length) * 100);
+  const status    = score >= 80 ? "Ready" : score >= 50 ? "Nearly Ready" : "Not Ready";
+  return { score, status, available, expiring, missing, expired, unclear, total: pool.length };
+}
+
+function ReadinessScoreSection({ docScore }) {
+  const score  = docScore.score;
+  const gaugeColor = score >= 80 ? "#22c55e" : score >= 50 ? "#f59e0b" : "#ef4444";
   const offset = GAUGE_CIRC - (score / 100) * GAUGE_CIRC;
+  const statusStyle =
+    score >= 80
+      ? { bg: "bg-emerald-50 border-emerald-100", txt: "text-emerald-700", lbl: "text-emerald-500" }
+      : score >= 50
+      ? { bg: "bg-amber-50 border-amber-100",     txt: "text-amber-700",   lbl: "text-amber-500"   }
+      : { bg: "bg-red-50 border-red-100",         txt: "text-red-700",     lbl: "text-red-500"     };
+  const critical = docScore.missing + docScore.expired;
 
   return (
-    <SectionCard icon={BarChart3} title="Readiness Score" subtitle="Powered by Compliance Engine (placeholder)" color="indigo">
+    <SectionCard icon={BarChart3} title="Document Readiness Score" subtitle="Based on mandatory document compliance" color="indigo">
       <div className="flex flex-col sm:flex-row items-center gap-6">
         {/* Gauge */}
         <div className="relative w-32 h-32 shrink-0">
@@ -706,7 +734,7 @@ function ReadinessScoreSection() {
             <circle
               cx="60" cy="60" r={GAUGE_R}
               fill="none"
-              stroke="#f59e0b"
+              stroke={gaugeColor}
               strokeWidth="10"
               strokeLinecap="round"
               strokeDasharray={GAUGE_CIRC}
@@ -723,37 +751,38 @@ function ReadinessScoreSection() {
         {/* Right */}
         <div className="flex-1 w-full space-y-3">
           <div className="flex flex-wrap gap-3">
-            <div className="p-3 rounded-xl bg-amber-50 border border-amber-100 flex-1 min-w-[90px] text-center">
-              <p className="text-xs text-amber-500 font-semibold">Status</p>
-              <p className="text-sm font-bold text-amber-700 mt-0.5">Nearly Ready</p>
+            <div className={`p-3 rounded-xl border flex-1 min-w-[90px] text-center ${statusStyle.bg}`}>
+              <p className={`text-xs font-semibold ${statusStyle.lbl}`}>Status</p>
+              <p className={`text-sm font-bold mt-0.5 ${statusStyle.txt}`}>{docScore.status}</p>
             </div>
             <div className="p-3 rounded-xl bg-red-50 border border-red-100 flex-1 min-w-[90px] text-center">
               <p className="text-xs text-red-500 font-semibold">Critical Issues</p>
-              <p className="text-sm font-bold text-red-700 mt-0.5">3 flagged</p>
+              <p className="text-sm font-bold text-red-700 mt-0.5">{critical > 0 ? `${critical} flagged` : "None"}</p>
             </div>
           </div>
 
-          {/* Mini category bars — placeholders */}
           <div className="space-y-2">
             {[
-              { label: "Documents",   pct: 90 },
-              { label: "Eligibility", pct: 75 },
-              { label: "Financial",   pct: 80 },
-              { label: "Personnel",   pct: 70 },
-            ].map(({ label, pct }) => (
+              { label: "Available",  n: docScore.available, color: "#22c55e" },
+              { label: "Expiring",   n: docScore.expiring,  color: "#f59e0b" },
+              { label: "Missing",    n: docScore.missing,   color: "#ef4444" },
+              { label: "Expired",    n: docScore.expired,   color: "#dc2626" },
+            ].map(({ label, n, color: c }) => (
               <div key={label} className="flex items-center gap-2">
                 <span className="text-xs text-slate-400 w-20 shrink-0">{label}</span>
                 <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                  <div className="h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} />
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: docScore.total > 0 ? `${Math.round((n / docScore.total) * 100)}%` : "0%",
+                      backgroundColor: c,
+                      transition: "width 1s ease",
+                    }}
+                  />
                 </div>
-                <span className="text-xs font-semibold text-slate-400 w-8 text-right">{pct}%</span>
+                <span className="text-xs font-semibold text-slate-500 w-10 text-right">{n}/{docScore.total}</span>
               </div>
             ))}
-          </div>
-
-          <div className="flex items-center gap-1.5 p-2.5 rounded-lg bg-indigo-50 border border-indigo-100">
-            <Cpu className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-            <p className="text-xs text-indigo-600">Live scores will be computed once the Compliance Engine runs.</p>
           </div>
         </div>
       </div>
@@ -773,7 +802,7 @@ const PLACEHOLDER_ACTIONS = [
 
 function ActionPlanSection() {
   return (
-    <SectionCard icon={Lightbulb} title="Action Plan" subtitle="Steps to reach full compliance (placeholder)" badge="6 items" color="amber">
+    <SectionCard icon={Lightbulb} title="Action Plan" subtitle="Recommended steps to reach full compliance" badge={`${PLACEHOLDER_ACTIONS.length} items`} color="amber">
       <div className="space-y-2">
         {PLACEHOLDER_ACTIONS.map((a, i) => (
           <div key={i} className={`flex items-start gap-3 p-3 rounded-xl border ${a.color}`}>
@@ -787,12 +816,6 @@ function ActionPlanSection() {
             <span className={`text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${a.pill}`}>{a.priority}</span>
           </div>
         ))}
-      </div>
-      <div className="mt-4 flex items-center gap-2 p-3 rounded-xl bg-amber-50 border border-amber-100">
-        <Zap className="w-4 h-4 text-amber-400 shrink-0" />
-        <p className="text-xs text-amber-700">
-          The Compliance Engine will generate a personalised, prioritised action plan from your actual gap analysis.
-        </p>
       </div>
     </SectionCard>
   );
@@ -810,6 +833,8 @@ export default function ComplianceAnalysis() {
     setDocs(loadDocuments());
     setTender(loadAnalysis());
   }, []);
+
+  const docScore = computeReadinessScore(tenderData, docs);
 
   return (
     <div className="space-y-5 max-w-5xl mx-auto px-1 pb-10">
@@ -841,9 +866,9 @@ export default function ComplianceAnalysis() {
         </div>
 
         {/* Engine status */}
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200">
-          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-xs font-bold text-amber-600">Engine: Pending Implementation</span>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200">
+          <span className="w-2 h-2 rounded-full bg-emerald-400" />
+          <span className="text-xs font-bold text-emerald-600">Engine: Active</span>
         </div>
       </div>
 
@@ -861,7 +886,6 @@ export default function ComplianceAnalysis() {
             and produces a <span className="font-semibold text-violet-600">Readiness Score</span> with a personalised{" "}
             <span className="font-semibold text-violet-600">Action Plan</span>.
           </p>
-          <ComingSoonBadge />
         </div>
       </div>
 
@@ -876,7 +900,7 @@ export default function ComplianceAnalysis() {
         <TenderRequirementsSection tenderData={tenderData} />
 
         {/* 3. Readiness Score */}
-        <ReadinessScoreSection />
+        <ReadinessScoreSection docScore={docScore} />
       </div>
 
       {/* Company Documents — full width */}
@@ -890,17 +914,6 @@ export default function ComplianceAnalysis() {
 
       {/* Action Plan — full width */}
       <ActionPlanSection />
-
-      {/* ── Footer CTA ── */}
-      <div className="flex flex-col items-center gap-2 pt-4 pb-2">
-        <div className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-slate-50 border border-slate-200">
-          <Cpu className="w-5 h-5 text-violet-400 shrink-0" />
-          <p className="text-sm text-slate-500">
-            Compliance Matching Engine implementation coming in the next build sprint.
-            All sections above will populate with real gap analysis data.
-          </p>
-        </div>
-      </div>
 
     </div>
   );

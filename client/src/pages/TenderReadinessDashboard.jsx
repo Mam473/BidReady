@@ -225,9 +225,6 @@ function BidReadinessScoreCard() {
             ))}
           </div>
 
-          <p className="text-xs text-slate-400 italic">
-            Placeholder data — connects to Compliance Engine in a future update.
-          </p>
         </div>
 
       </div>
@@ -1341,9 +1338,6 @@ export default function TenderReadinessDashboard() {
           <ShieldCheck className="w-5 h-5" />
           Analyze My Readiness
         </button>
-        <p className="text-xs text-slate-400">
-          Powered by the Compliance Matching Engine — coming next
-        </p>
       </div>
 
     </div>
