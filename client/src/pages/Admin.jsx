@@ -287,7 +287,7 @@ export default function Admin() {
                         <td className="px-6 py-4 font-medium text-slate-800">{tx.user_id}</td>
                         <td className="px-6 py-4 text-slate-600">{tx.plan_name}</td>
                         <td className="px-6 py-4 text-right font-semibold text-slate-900">
-                          ₦{Number(tx.amount / 100).toLocaleString()}
+                          ₦{Number(tx.amount).toLocaleString()}
                         </td>
                         <td className="px-6 py-4 text-center">
                           <span

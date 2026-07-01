@@ -784,11 +784,13 @@ app.post("/api/payment/initialize", async (req, res) => {
       throw new Error(paystackData.message || "Paystack initialization failed");
     }
 
+    // Paystack sends amount in kobo — convert to Naira before persisting
+    const nairaAmount = Math.round(amount / 100);
     await db.query(
       `INSERT INTO payments (user_id, plan_name, amount, payment_reference, payment_status)
        VALUES ($1, $2, $3, $4, 'pending')
        ON CONFLICT (payment_reference) DO NOTHING`,
-      [userId || "anonymous", planName, amount, reference]
+      [userId || "anonymous", planName, nairaAmount, reference]
     );
 
     res.json({ reference, publicKey, email });
@@ -865,17 +867,19 @@ app.get("/api/payment/verify/:reference", async (req, res) => {
 
     if (paystackData?.data?.status === "success") {
       const { amount, customer, metadata } = paystackData.data;
-      const userId   = metadata?.user_id  || "anonymous";
-      const planName = metadata?.plan_name || "unknown";
+      const userId    = metadata?.user_id  || "anonymous";
+      const planName  = metadata?.plan_name || "unknown";
+      // Paystack returns amount in kobo — store in Naira
+      const nairaAmt  = Math.round(amount / 100);
 
       await db.query(
         `INSERT INTO payments (user_id, plan_name, amount, payment_reference, payment_status)
          VALUES ($1, $2, $3, $4, 'success')
          ON CONFLICT (payment_reference)
-         DO UPDATE SET payment_status = 'success', updated_at = NOW()`,
-        [userId, planName, amount, payRef]
+         DO UPDATE SET payment_status = 'success', amount = $3, updated_at = NOW()`,
+        [userId, planName, nairaAmt, payRef]
       );
-      console.log(`Pre-verified and saved: ${payRef} — ₦${amount / 100} from ${customer?.email}`);
+      console.log(`Pre-verified and saved: ${payRef} — ₦${nairaAmt} from ${customer?.email}`);
       return res.json({ verified: true, source: "paystack" });
     }
 
@@ -891,7 +895,14 @@ app.get("/api/admin/stats", async (req, res) => {
   try {
     const result = await db.query(`
       SELECT
-        COALESCE(SUM(amount) FILTER (WHERE payment_status = 'success'), 0)::int AS "totalRevenue",
+        -- Retroactive kobo-to-Naira patch: historical rows stored raw Paystack
+        -- kobo values (≥ 500,000). If the cumulative sum exceeds that threshold
+        -- it means the column still holds kobo figures, so we divide by 100.
+        CASE
+          WHEN COALESCE(SUM(amount) FILTER (WHERE payment_status = 'success'), 0) >= 500000
+          THEN (COALESCE(SUM(amount) FILTER (WHERE payment_status = 'success'), 0) / 100)
+          ELSE  COALESCE(SUM(amount) FILTER (WHERE payment_status = 'success'), 0)
+        END::int AS "totalRevenue",
         COUNT(DISTINCT user_id) FILTER (WHERE payment_status = 'success')::int AS "payingCustomers",
         COUNT(*)::int AS "totalTransactions",
         ROUND(
@@ -911,8 +922,19 @@ app.get("/api/admin/stats", async (req, res) => {
 app.get("/api/admin/transactions", async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT id, user_id, plan_name, amount, payment_reference, payment_status, created_at
-       FROM payments ORDER BY created_at DESC LIMIT 50`
+      `SELECT
+         id,
+         user_id,
+         plan_name,
+         -- Per-row retroactive fix: rows that stored raw kobo (≥ 500,000) are
+         -- divided by 100 so the client always receives a Naira figure.
+         CASE WHEN amount >= 500000 THEN amount / 100 ELSE amount END AS amount,
+         payment_reference,
+         payment_status,
+         created_at
+       FROM payments
+       ORDER BY created_at DESC
+       LIMIT 100`
     );
     res.json({ transactions: result.rows });
   } catch (err) {
