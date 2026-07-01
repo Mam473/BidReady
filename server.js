@@ -24,6 +24,29 @@ app.use(express.json({ limit: "10mb" }));
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
+// ── Disk storage for company compliance documents ────────────────────────────
+const DOCS_UPLOAD_DIR = path.join(process.cwd(), "uploads", "documents");
+fs.mkdirSync(DOCS_UPLOAD_DIR, { recursive: true });
+
+const docDiskStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, DOCS_UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
+    const ext = path.extname(file.originalname) || ".pdf";
+    cb(null, `${unique}${ext}`);
+  },
+});
+const uploadCompanyDoc = multer({
+  storage: docDiskStorage,
+  limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const isPdf =
+      file.mimetype === "application/pdf" ||
+      file.originalname.toLowerCase().endsWith(".pdf");
+    cb(isPdf ? null : new Error("Only PDF files are accepted."), isPdf);
+  },
+});
+
 // ─── Schema bootstrap — idempotent, runs once on every startup ─────────────
 async function initSchema() {
   try {
@@ -55,6 +78,19 @@ async function initSchema() {
         ON payments (payment_status);
       CREATE INDEX IF NOT EXISTS idx_payments_reference
         ON payments (payment_reference);
+    `);
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS company_documents (
+        id          SERIAL PRIMARY KEY,
+        name        TEXT        NOT NULL,
+        type        TEXT        NOT NULL DEFAULT '',
+        file_name   TEXT        NOT NULL,
+        file_path   TEXT        NOT NULL,
+        expiry_date DATE,
+        uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_company_documents_uploaded
+        ON company_documents (uploaded_at DESC);
     `);
     console.log("Database schema initialised.");
   } catch (err) {
@@ -1189,6 +1225,89 @@ app.get("/api/tender/analyses", async (req, res) => {
           `SELECT id, tender_name, company_name, created_at FROM tender_analyses ORDER BY created_at DESC LIMIT 20`
         );
     res.json({ success: true, analyses: rows.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Company Documents endpoints ──────────────────────────────────────────────
+
+// GET /api/documents — list all company compliance documents
+app.get("/api/documents", async (_req, res) => {
+  try {
+    const { rows } = await db.query(
+      "SELECT * FROM company_documents ORDER BY uploaded_at DESC"
+    );
+    res.json(
+      rows.map((r) => ({
+        id: r.id.toString(),
+        name: r.name,
+        type: r.type,
+        fileName: r.file_name,
+        expiryDate: r.expiry_date
+          ? new Date(r.expiry_date).toISOString().split("T")[0]
+          : null,
+        uploadedAt: r.uploaded_at.toISOString(),
+      }))
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/documents — upload a compliance document (multipart field: "document")
+app.post("/api/documents", uploadCompanyDoc.single("document"), async (req, res) => {
+  try {
+    if (!req.file)
+      return res
+        .status(400)
+        .json({ error: "No file received. Send a PDF as the 'document' field." });
+
+    const { name, type, expiryDate } = req.body;
+    if (!name || !type)
+      return res
+        .status(400)
+        .json({ error: "'name' and 'type' are required body fields." });
+
+    const { rows } = await db.query(
+      `INSERT INTO company_documents (name, type, file_name, file_path, expiry_date)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [
+        name.trim(),
+        type.trim(),
+        req.file.originalname,
+        req.file.path,
+        expiryDate || null,
+      ]
+    );
+    const r = rows[0];
+    res.status(201).json({
+      id: r.id.toString(),
+      name: r.name,
+      type: r.type,
+      fileName: r.file_name,
+      expiryDate: r.expiry_date
+        ? new Date(r.expiry_date).toISOString().split("T")[0]
+        : null,
+      uploadedAt: r.uploaded_at.toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/documents/:id — remove a document from DB and disk
+app.delete("/api/documents/:id", async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      "DELETE FROM company_documents WHERE id = $1 RETURNING *",
+      [req.params.id]
+    );
+    if (!rows.length)
+      return res.status(404).json({ error: "Document not found." });
+    // Best-effort disk cleanup — don't fail the request if file is already gone
+    fs.unlink(rows[0].file_path, () => {});
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
