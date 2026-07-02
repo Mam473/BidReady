@@ -71,7 +71,8 @@ async function initSchema() {
       CREATE TABLE IF NOT EXISTS payments (
         id                SERIAL PRIMARY KEY,
         user_id           TEXT        NOT NULL DEFAULT 'anonymous',
-        plan_name         TEXT        NOT NULL,
+        company_name      TEXT        NOT NULL DEFAULT 'Unknown',
+        plan_name         TEXT        NOT NULL DEFAULT 'Unknown Plan',
         amount            INTEGER     NOT NULL,
         payment_reference TEXT        NOT NULL UNIQUE,
         payment_status    TEXT        NOT NULL DEFAULT 'pending',
@@ -98,6 +99,9 @@ async function initSchema() {
       CREATE INDEX IF NOT EXISTS idx_company_documents_uploaded
         ON company_documents (uploaded_at DESC);
     `);
+    // ── Additive migrations for existing deployments ─────────────────────────
+    await db.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS company_name TEXT NOT NULL DEFAULT 'Unknown'`);
+    await db.query(`ALTER TABLE payments ADD COLUMN IF NOT EXISTS plan_name    TEXT NOT NULL DEFAULT 'Unknown Plan'`);
     console.log("Database schema initialised.");
   } catch (err) {
     console.error("Schema init error:", err.message);
