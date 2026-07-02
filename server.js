@@ -348,17 +348,22 @@ app.post("/api/analyze", upload.array("files", 20), async (req, res) => {
             if (verifyData?.data?.status === "success") {
               paystackVerified = true;
               const { amount, customer, metadata } = verifyData.data;
-              const userId   = metadata?.user_id  || "anonymous";
-              const planName = metadata?.plan_name || "unknown";
+              const nairaAmt    = Math.round(amount / 100);
+              const companyName = resolveCompanyName(customer, metadata);
+              const planName    = resolvePlanName(nairaAmt, metadata?.plan_name);
 
               await db.query(
                 `INSERT INTO payments (user_id, plan_name, amount, payment_reference, payment_status)
                  VALUES ($1, $2, $3, $4, 'success')
                  ON CONFLICT (payment_reference)
-                 DO UPDATE SET payment_status = 'success', updated_at = NOW()`,
-                [userId, planName, amount, payRef]
+                 DO UPDATE SET payment_status = 'success',
+                               user_id        = $1,
+                               plan_name      = $2,
+                               amount         = $3,
+                               updated_at     = NOW()`,
+                [companyName, planName, nairaAmt, payRef]
               );
-              console.log(`[gate] Paystack live-verified and saved: ${payRef} — ₦${amount / 100} from ${customer?.email}`);
+              console.log(`[gate] Paystack live-verified and saved: ${payRef} — ₦${nairaAmt} (${planName}) from ${companyName}`);
             } else {
               paystackReason = `Paystack returned status="${verifyData?.data?.status}" msg="${verifyData?.message}"`;
             }
@@ -743,6 +748,27 @@ The "requirements" array must contain exactly ${unresolvedCategories.length} ent
   }
 });
 
+// ─── Payment helpers ───────────────────────────────────────────────────────
+
+// Derive a human-readable plan name from the Naira amount (already converted).
+function resolvePlanName(nairaAmount, metadataPlanName) {
+  if (metadataPlanName && metadataPlanName !== "unknown") return metadataPlanName;
+  if (nairaAmount >= 20000) return "Consultant Plan";
+  if (nairaAmount >= 8000)  return "SME Monthly Plan";
+  return "Single Tender Analysis";
+}
+
+// Extract the company name from every location Paystack may include it.
+function resolveCompanyName(customer, metadata) {
+  return (
+    customer?.metadata?.company_name ||
+    metadata?.company_name ||
+    metadata?.custom_fields?.find((f) => f.variable_name === "company_name")?.value ||
+    customer?.email ||
+    "RHOCOM TECHNOLOGY LTD"
+  );
+}
+
 // ─── Payment: Initialize ───────────────────────────────────────────────────
 app.post("/api/payment/initialize", async (req, res) => {
   const { planId, planName, amount, userId, email } = req.body;
@@ -822,13 +848,22 @@ app.post("/api/payment/webhook", express.raw({ type: "application/json" }), asyn
   }
 
   if (event.event === "charge.success") {
-    const { reference, amount, customer } = event.data;
+    const { reference, amount, customer, metadata } = event.data;
+    const nairaAmt   = Math.round(amount / 100);
+    const companyName = resolveCompanyName(customer, metadata);
+    const planName    = resolvePlanName(nairaAmt, metadata?.plan_name);
     try {
       await db.query(
-        `UPDATE payments SET payment_status = 'success' WHERE payment_reference = $1`,
-        [reference]
+        `UPDATE payments
+         SET payment_status = 'success',
+             user_id        = $2,
+             plan_name      = $3,
+             amount         = $4,
+             updated_at     = NOW()
+         WHERE payment_reference = $1`,
+        [reference, companyName, planName, nairaAmt]
       );
-      console.log(`Payment confirmed: ${reference} — ₦${amount / 100} from ${customer?.email}`);
+      console.log(`Payment confirmed: ${reference} — ₦${nairaAmt} (${planName}) from ${companyName}`);
     } catch (err) {
       console.error("Webhook DB update error:", err?.message);
     }
@@ -867,19 +902,23 @@ app.get("/api/payment/verify/:reference", async (req, res) => {
 
     if (paystackData?.data?.status === "success") {
       const { amount, customer, metadata } = paystackData.data;
-      const userId    = metadata?.user_id  || "anonymous";
-      const planName  = metadata?.plan_name || "unknown";
       // Paystack returns amount in kobo — store in Naira
-      const nairaAmt  = Math.round(amount / 100);
+      const nairaAmt    = Math.round(amount / 100);
+      const companyName = resolveCompanyName(customer, metadata);
+      const planName    = resolvePlanName(nairaAmt, metadata?.plan_name);
 
       await db.query(
         `INSERT INTO payments (user_id, plan_name, amount, payment_reference, payment_status)
          VALUES ($1, $2, $3, $4, 'success')
          ON CONFLICT (payment_reference)
-         DO UPDATE SET payment_status = 'success', amount = $3, updated_at = NOW()`,
-        [userId, planName, nairaAmt, payRef]
+         DO UPDATE SET payment_status = 'success',
+                       user_id        = $1,
+                       plan_name      = $2,
+                       amount         = $3,
+                       updated_at     = NOW()`,
+        [companyName, planName, nairaAmt, payRef]
       );
-      console.log(`Pre-verified and saved: ${payRef} — ₦${nairaAmt} from ${customer?.email}`);
+      console.log(`Pre-verified and saved: ${payRef} — ₦${nairaAmt} (${planName}) from ${companyName}`);
       return res.json({ verified: true, source: "paystack" });
     }
 
