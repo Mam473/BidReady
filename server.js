@@ -18,7 +18,13 @@ const { Pool } = pg;
 const app = express();
 const PORT = 3001;
 
-app.use(cors());
+app.use(cors({
+  origin: true,          // reflect any request origin — allows Replit dev domains
+  credentials: false,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Payment-Reference"],
+}));
+app.options("*", cors());  // pre-flight for every route
 app.use(express.json({ limit: "10mb" }));
 
 const db = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -933,35 +939,32 @@ app.get("/api/payment/verify/:reference", async (req, res) => {
 app.get("/api/admin/stats", async (req, res) => {
   try {
     const result = await db.query(`
+      WITH rev AS (
+        -- Global revenue across entire table; no company/session filter.
+        SELECT COALESCE(SUM(amount), 0) AS raw
+        FROM payments
+        WHERE payment_status = 'success' OR payment_status = 'confirmed'
+      )
       SELECT
-        -- Global revenue: sum all successful/confirmed rows across the entire table.
-        -- Retroactive kobo-to-Naira patch: if the raw sum exceeds 500 000 the column
+        -- Retroactive kobo-to-Naira patch: if raw sum ≥ 500 000 the column
         -- still holds Paystack kobo values, so divide by 100.
-        CASE
-          WHEN COALESCE(
-                 (SELECT SUM(amount) FROM payments
-                  WHERE payment_status = 'success' OR payment_status = 'confirmed'), 0
-               ) >= 500000
-          THEN (COALESCE(
-                 (SELECT SUM(amount) FROM payments
-                  WHERE payment_status = 'success' OR payment_status = 'confirmed'), 0
-               ) / 100)
-          ELSE COALESCE(
-                 (SELECT SUM(amount) FROM payments
-                  WHERE payment_status = 'success' OR payment_status = 'confirmed'), 0
-               )
-        END::int AS "totalRevenue",
-        -- Global paying-customer count (no company filter).
-        COUNT(DISTINCT user_id) FILTER (
-          WHERE payment_status = 'success' OR payment_status = 'confirmed'
-        )::int AS "payingCustomers",
-        -- Global transaction count.
-        COUNT(*)::int AS "totalTransactions",
+        (CASE WHEN rev.raw >= 500000 THEN rev.raw / 100 ELSE rev.raw END)::bigint
+          AS "totalRevenue",
+        (SELECT COUNT(DISTINCT user_id)
+           FROM payments
+          WHERE payment_status = 'success' OR payment_status = 'confirmed')::int
+          AS "payingCustomers",
+        (SELECT COUNT(*) FROM payments)::int
+          AS "totalTransactions",
         ROUND(
-          COUNT(*) FILTER (WHERE payment_status = 'success' OR payment_status = 'confirmed')
-          * 100.0 / NULLIF(COUNT(*), 0), 1
-        )::float AS "successRate"
-      FROM payments
+          (SELECT COUNT(*) FROM payments
+            WHERE payment_status = 'success' OR payment_status = 'confirmed')
+          * 100.0
+          / NULLIF((SELECT COUNT(*) FROM payments), 0),
+          1
+        )::float
+          AS "successRate"
+      FROM rev
     `);
     res.json(result.rows[0]);
   } catch (err) {

@@ -3,10 +3,18 @@ import { DollarSign, Users, CreditCard, TrendingUp, RefreshCw, Lock, ShieldOff, 
 
 const STORAGE_KEY = "bidready_admin_token";
 
+// Direct-to-backend base URL — bypasses Vite proxy on Replit where the
+// internal proxy tunnel can silently drop admin requests.
+const API_BASE = window.location.origin.includes("replit.dev") ||
+                 window.location.origin.includes("repl.co")
+  ? "http://localhost:3001"
+  : "http://localhost:3001";
+
 const STATUS_COLORS = {
-  success: "bg-green-100 text-green-700",
-  pending: "bg-yellow-100 text-yellow-700",
-  failed:  "bg-red-100 text-red-700",
+  success:   "bg-green-100 text-green-700",
+  confirmed: "bg-green-100 text-green-700",
+  pending:   "bg-yellow-100 text-yellow-700",
+  failed:    "bg-red-100 text-red-700",
 };
 
 function authHeaders(token) {
@@ -31,8 +39,8 @@ export default function Admin() {
     setError("");
     try {
       const [statsRes, txRes] = await Promise.all([
-        fetch("/api/admin/stats",        { headers: authHeaders(tok) }),
-        fetch("/api/admin/transactions", { headers: authHeaders(tok) }),
+        fetch(`${API_BASE}/api/admin/stats`,        { headers: authHeaders(tok) }),
+        fetch(`${API_BASE}/api/admin/transactions`, { headers: authHeaders(tok) }),
       ]);
       if (statsRes.status === 401 || txRes.status === 401) {
         localStorage.removeItem(STORAGE_KEY);
@@ -57,7 +65,7 @@ export default function Admin() {
     (async () => {
       setAuthChecking(true);
       try {
-        const res = await fetch("/api/admin/stats", { headers: authHeaders(token) });
+        const res = await fetch(`${API_BASE}/api/admin/stats`, { headers: authHeaders(token) });
         if (res.status === 401) {
           localStorage.removeItem(STORAGE_KEY);
           setToken("");
@@ -66,7 +74,7 @@ export default function Admin() {
         setAuthed(true);
         const statsData = await res.json();
         setStats(statsData);
-        const txRes = await fetch("/api/admin/transactions", { headers: authHeaders(token) });
+        const txRes = await fetch(`${API_BASE}/api/admin/transactions`, { headers: authHeaders(token) });
         const txData = await txRes.json();
         setTransactions(txData.transactions || []);
       } catch {
@@ -82,7 +90,7 @@ export default function Admin() {
     setAuthError("");
     setAuthChecking(true);
     try {
-      const res = await fetch("/api/admin/stats", {
+      const res = await fetch(`${API_BASE}/api/admin/stats`, {
         headers: { Authorization: `Bearer ${pwInput}` },
       });
       if (res.status === 401) {
@@ -96,7 +104,7 @@ export default function Admin() {
       setToken(pwInput);
       setStats(statsData);
       setAuthed(true);
-      const txRes = await fetch("/api/admin/transactions", {
+      const txRes = await fetch(`${API_BASE}/api/admin/transactions`, {
         headers: { Authorization: `Bearer ${pwInput}` },
       });
       const txData = await txRes.json();
@@ -284,7 +292,7 @@ export default function Admin() {
                   <tbody className="divide-y divide-slate-100">
                     {transactions.map((tx) => (
                       <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4 font-medium text-slate-800">{tx.user_id}</td>
+                        <td className="px-6 py-4 font-medium text-slate-800">{tx.company_name}</td>
                         <td className="px-6 py-4 text-slate-600">{tx.plan_name}</td>
                         <td className="px-6 py-4 text-right font-semibold text-slate-900">
                           ₦{Number(tx.amount).toLocaleString()}
