@@ -107,7 +107,88 @@ async function initSchema() {
     console.error("Schema init error:", err.message);
   }
 }
-initSchema();
+initSchema().then(() => syncPaystackLedger());
+
+// ─── Paystack Historical Ledger Sync ───────────────────────────────────────
+// Runs once on boot. Pulls every successful transaction from the live Paystack
+// account and inserts them idempotently into the payments table.
+async function syncPaystackLedger() {
+  const secretKey = process.env.PAYSTACK_SECRET_KEY;
+  if (!secretKey) {
+    console.warn("syncPaystackLedger: PAYSTACK_SECRET_KEY not set — skipping.");
+    return;
+  }
+
+  function derivePlanName(nairaAmount) {
+    if (nairaAmount >= 20000) return "Consultant Plan";
+    if (nairaAmount >= 8000)  return "SME Monthly Plan";
+    return "Single Tender Analysis";
+  }
+
+  function deriveCompanyName(tx) {
+    return (
+      tx.customer?.metadata?.company_name ||
+      tx.metadata?.custom_fields?.find(
+        (f) => f.variable_name === "company_name"
+      )?.value ||
+      tx.customer?.email ||
+      "RHOCOM TECHNOLOGY LTD"
+    );
+  }
+
+  let page = 1;
+  let imported = 0;
+
+  try {
+    while (true) {
+      const url =
+        `https://api.paystack.co/transaction?status=success&perPage=100&page=${page}`;
+      const resp = await fetch(url, {
+        headers: { Authorization: `Bearer ${secretKey}` },
+      });
+
+      if (!resp.ok) {
+        console.error(
+          `syncPaystackLedger: Paystack API error ${resp.status} on page ${page}`
+        );
+        break;
+      }
+
+      const body = await resp.json();
+      const txs  = body.data || [];
+      if (txs.length === 0) break;   // no more pages
+
+      for (const tx of txs) {
+        const ref         = tx.reference;
+        const nairaAmount = Math.round(tx.amount / 100);
+        const status      = tx.status || "success";
+        const companyName = deriveCompanyName(tx);
+        const planName    = derivePlanName(nairaAmount);
+        const createdAt   = tx.created_at || new Date().toISOString();
+        const userId      = tx.customer?.email || "paystack-import";
+
+        await db.query(
+          `INSERT INTO payments
+             (user_id, company_name, plan_name, amount, payment_reference,
+              payment_status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+           ON CONFLICT (payment_reference) DO NOTHING`,
+          [userId, companyName, planName, nairaAmount, ref,
+           status, createdAt]
+        );
+        imported++;
+      }
+
+      // Paystack returns meta.pageCount; stop when we've read all pages
+      if (page >= (body.meta?.pageCount || 1)) break;
+      page++;
+    }
+
+    console.log(`syncPaystackLedger: synced ${imported} transaction(s) from Paystack.`);
+  } catch (err) {
+    console.error("syncPaystackLedger error:", err.message);
+  }
+}
 
 function truncate(text, maxChars) {
   if (!text) return "";
