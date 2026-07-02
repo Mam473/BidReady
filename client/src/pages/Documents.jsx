@@ -1,8 +1,22 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   Upload, FileText, Trash2, AlertTriangle, CheckCircle2,
-  Clock, Calendar, Plus, X, ShieldCheck, Loader2,
+  Clock, Calendar, Plus, X, ShieldCheck, Loader2, Lock,
 } from "lucide-react";
+
+// ── Access gate (mirrors Analysis.jsx) ───────────────────────────────────────
+const ADMIN_KEY    = "bidready_admin_token";
+const PAYMENT_KEY  = "bidready_payment_ref";
+const PAYSTACK_KEY = "paystack_reference";
+
+function resolveAccessMode() {
+  const adminToken = (localStorage.getItem(ADMIN_KEY) || "").trim();
+  if (adminToken) return "unlocked";
+  const ref =
+    (localStorage.getItem(PAYMENT_KEY)  || "").trim() ||
+    (localStorage.getItem(PAYSTACK_KEY) || "").trim();
+  return ref ? "unlocked" : "locked";
+}
 
 const API = "/api/documents";
 
@@ -62,12 +76,14 @@ export default function Documents() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [dragOver, setDragOver] = useState(false);
+  const [accessMode, setAccessMode] = useState(() => resolveAccessMode());
+  const isLocked = accessMode === "locked";
 
   // ── The file input lives at this level, OUTSIDE the dropzone div,
   //    so its click event cannot bubble back up into the dropzone onClick.
   const fileRef = useRef();
 
-  useEffect(() => { fetchDocs(); }, []);
+  useEffect(() => { fetchDocs(); setAccessMode(resolveAccessMode()); }, []);
 
   async function fetchDocs() {
     try {
@@ -208,7 +224,11 @@ export default function Documents() {
             Upload and manage your government compliance certificates
           </p>
         </div>
-        <button onClick={() => setShowModal(true)} className="btn-primary">
+        <button
+          onClick={() => !isLocked && setShowModal(true)}
+          disabled={isLocked}
+          className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+        >
           <Plus className="w-4 h-4" />
           Add Document
         </button>
@@ -265,27 +285,44 @@ export default function Documents() {
         onClick calls fileRef.current.click() to open the file picker without
         any risk of the click event re-triggering this div's handler.
       */}
-      <div
-        onDrop={handleDrop}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onClick={() => fileRef.current.click()}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && fileRef.current.click()}
-        className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-200 select-none ${
-          dragOver
-            ? "border-brand-400 bg-brand-50 scale-[1.01]"
-            : "border-slate-200 hover:border-brand-300 hover:bg-brand-50/50"
-        }`}
-      >
-        <div className="w-12 h-12 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center mx-auto mb-3">
-          <Upload className="w-6 h-6 text-brand-500" />
+      <div className="relative">
+        <div
+          onDrop={isLocked ? undefined : handleDrop}
+          onDragOver={isLocked ? undefined : (e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={isLocked ? undefined : () => setDragOver(false)}
+          onClick={isLocked ? undefined : () => fileRef.current.click()}
+          role="button"
+          tabIndex={isLocked ? -1 : 0}
+          onKeyDown={isLocked ? undefined : (e) => (e.key === "Enter" || e.key === " ") && fileRef.current.click()}
+          aria-disabled={isLocked}
+          className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-200 select-none ${
+            isLocked
+              ? "border-slate-200 bg-slate-50/60 opacity-60 pointer-events-none cursor-default"
+              : dragOver
+              ? "border-brand-400 bg-brand-50 scale-[1.01] cursor-pointer"
+              : "border-slate-200 hover:border-brand-300 hover:bg-brand-50/50 cursor-pointer"
+          }`}
+        >
+          <div className="w-12 h-12 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center mx-auto mb-3">
+            <Upload className="w-6 h-6 text-brand-500" />
+          </div>
+          <p className="font-semibold text-slate-700 text-sm">Drop a PDF here or click to browse</p>
+          <p className="text-xs text-slate-400 mt-1">
+            Supports Tax Clearance, CAC Certificates, PENCOM, NSITF, and more
+          </p>
         </div>
-        <p className="font-semibold text-slate-700 text-sm">Drop a PDF here or click to browse</p>
-        <p className="text-xs text-slate-400 mt-1">
-          Supports Tax Clearance, CAC Certificates, PENCOM, NSITF, and more
-        </p>
+
+        {/* ── Access lock overlay ── */}
+        {isLocked && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl">
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-slate-200 shadow-sm max-w-xs text-center">
+              <Lock className="w-4 h-4 text-slate-400 shrink-0" />
+              <p className="text-xs font-medium text-slate-500 leading-snug">
+                Analysis Lock Active: Please select a premium plan to activate this workspace uploader.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Document list ── */}

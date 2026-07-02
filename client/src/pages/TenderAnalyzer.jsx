@@ -4,8 +4,22 @@ import {
   Building2, Calendar, Clock, MapPin, Tag, FileCheck,
   Users, DollarSign, Wrench, Shield, BarChart3, XCircle,
   AlertOctagon, Sparkles, ChevronDown, ChevronUp, Download,
-  ClipboardList,
+  ClipboardList, Lock,
 } from "lucide-react";
+
+// ── Access gate (mirrors Analysis.jsx) ───────────────────────────────────────
+const ADMIN_KEY    = "bidready_admin_token";
+const PAYMENT_KEY  = "bidready_payment_ref";
+const PAYSTACK_KEY = "paystack_reference";
+
+function resolveAccessMode() {
+  const adminToken = (localStorage.getItem(ADMIN_KEY) || "").trim();
+  if (adminToken) return "unlocked";
+  const ref =
+    (localStorage.getItem(PAYMENT_KEY)  || "").trim() ||
+    (localStorage.getItem(PAYSTACK_KEY) || "").trim();
+  return ref ? "unlocked" : "locked";
+}
 
 function Badge({ text, variant = "default" }) {
   const cls = {
@@ -163,6 +177,8 @@ export default function TenderAnalyzer() {
   const [step, setStep]           = useState("idle"); // idle | uploading | extracting | done | error
   const [result, setResult]       = useState(null);
   const [error, setError]         = useState(null);
+  const [accessMode]              = useState(() => resolveAccessMode());
+  const isLocked                  = accessMode === "locked";
   const fileRef                   = useRef();
 
   const profile = (() => {
@@ -258,57 +274,77 @@ export default function TenderAnalyzer() {
 
       {/* Upload zone */}
       {step !== "done" && (
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          onClick={() => !file && fileRef.current?.click()}
-          className={`rounded-2xl border-2 border-dashed transition-all cursor-pointer
-            ${dragOver ? "border-brand-400 bg-brand-50" : file ? "border-emerald-300 bg-emerald-50 cursor-default" : "border-slate-200 bg-slate-50 hover:border-brand-300 hover:bg-brand-50/40"}`}
-        >
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png"
-            className="hidden"
-            onChange={(e) => pickFile(e.target.files?.[0])}
-          />
+        <div className="relative">
+          <div
+            onDragOver={isLocked ? undefined : (e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={isLocked ? undefined : () => setDragOver(false)}
+            onDrop={isLocked ? undefined : handleDrop}
+            onClick={isLocked ? undefined : () => !file && fileRef.current?.click()}
+            className={`rounded-2xl border-2 border-dashed transition-all
+              ${isLocked
+                ? "border-slate-200 bg-slate-50/60 opacity-60 pointer-events-none cursor-default"
+                : dragOver
+                ? "border-brand-400 bg-brand-50 cursor-pointer"
+                : file
+                ? "border-emerald-300 bg-emerald-50 cursor-default"
+                : "border-slate-200 bg-slate-50 hover:border-brand-300 hover:bg-brand-50/40 cursor-pointer"}`}
+          >
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png"
+              className="hidden"
+              onChange={(e) => pickFile(e.target.files?.[0])}
+            />
 
-          {!file ? (
-            <div className="p-10 text-center">
-              <div className="w-14 h-14 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center mx-auto mb-4">
-                <Upload className="w-7 h-7 text-brand-500" />
-              </div>
-              <p className="font-semibold text-slate-700">Drop your tender document here</p>
-              <p className="text-sm text-slate-400 mt-1">ITT, RFQ, EOI — all tender document types supported</p>
-              <p className="text-xs text-slate-400 font-medium mt-2">
-                Supported formats: <span className="text-brand-500 font-semibold">PDF • DOC • DOCX • JPG • JPEG • PNG</span>
-              </p>
-              <button
-                onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
-                className="mt-4 btn-primary text-sm"
-              >
-                Browse Files
-              </button>
-            </div>
-          ) : (
-            <div className="p-5 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
-                  <FileText className="w-5 h-5 text-emerald-600" />
+            {!file ? (
+              <div className="p-10 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center mx-auto mb-4">
+                  <Upload className="w-7 h-7 text-brand-500" />
                 </div>
-                <div>
-                  <p className="font-semibold text-slate-800 text-sm">{file.name}</p>
-                  <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(0)} KB</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
+                <p className="font-semibold text-slate-700">Drop your tender document here</p>
+                <p className="text-sm text-slate-400 mt-1">ITT, RFQ, EOI — all tender document types supported</p>
+                <p className="text-xs text-slate-400 font-medium mt-2">
+                  Supported formats: <span className="text-brand-500 font-semibold">PDF • DOC • DOCX • JPG • JPEG • PNG</span>
+                </p>
                 <button
-                  onClick={(e) => { e.stopPropagation(); setFile(null); setError(null); setStep("idle"); }}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
+                  className="mt-4 btn-primary text-sm"
                 >
-                  <XCircle className="w-4 h-4" />
+                  Browse Files
                 </button>
+              </div>
+            ) : (
+              <div className="p-5 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+                    <FileText className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800 text-sm">{file.name}</p>
+                    <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(0)} KB</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setFile(null); setError(null); setStep("idle"); }}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  >
+                    <XCircle className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Access lock overlay ── */}
+          {isLocked && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl">
+              <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-slate-200 shadow-sm max-w-xs text-center">
+                <Lock className="w-4 h-4 text-slate-400 shrink-0" />
+                <p className="text-xs font-medium text-slate-500 leading-snug">
+                  Analysis Lock Active: Please select a premium plan to activate this workspace uploader.
+                </p>
               </div>
             </div>
           )}
@@ -329,9 +365,9 @@ export default function TenderAnalyzer() {
       {/* Analyze button */}
       {file && step !== "done" && (
         <button
-          onClick={runExtraction}
-          disabled={step === "extracting" || step === "uploading"}
-          className="btn-primary w-full justify-center text-base py-3"
+          onClick={isLocked ? undefined : runExtraction}
+          disabled={isLocked || step === "extracting" || step === "uploading"}
+          className="btn-primary w-full justify-center text-base py-3 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {step === "extracting" || step === "uploading" ? (
             <><Loader2 className="w-5 h-5 animate-spin" /> Analyzing Document…</>

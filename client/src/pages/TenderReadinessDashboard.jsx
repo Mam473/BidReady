@@ -31,8 +31,23 @@ import {
   CalendarDays,
   Clock3,
   CheckCircle,
+  Lock,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+
+// ── Access gate (mirrors Analysis.jsx) ───────────────────────────────────────
+const ADMIN_KEY    = "bidready_admin_token";
+const PAYMENT_KEY  = "bidready_payment_ref";
+const PAYSTACK_KEY = "paystack_reference";
+
+function resolveAccessMode() {
+  const adminToken = (localStorage.getItem(ADMIN_KEY) || "").trim();
+  if (adminToken) return "unlocked";
+  const ref =
+    (localStorage.getItem(PAYMENT_KEY)  || "").trim() ||
+    (localStorage.getItem(PAYSTACK_KEY) || "").trim();
+  return ref ? "unlocked" : "locked";
+}
 
 // ── Data helpers ─────────────────────────────────────────────────────────────
 
@@ -1137,6 +1152,8 @@ function PlaceholderActionItem() {
 export default function TenderReadinessDashboard() {
   const navigate  = useNavigate();
   const saved     = useTenderAnalysis();
+  const [accessMode] = useState(() => resolveAccessMode());
+  const isLocked  = accessMode === "locked";
   const analysis  = saved?.analysis || null;
   const ti        = analysis?.tenderInfo        || {};
   const sd        = analysis?.submissionDetails || {};
@@ -1331,13 +1348,29 @@ export default function TenderReadinessDashboard() {
 
       {/* ── Analyze My Readiness CTA ─────────────────────────────────────────── */}
       <div className="flex flex-col items-center gap-3 py-8">
-        <button
-          onClick={() => navigate("/compliance-analysis")}
-          className="inline-flex items-center gap-3 px-8 py-4 rounded-2xl bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 text-white text-base font-bold shadow-lg shadow-violet-200 hover:shadow-violet-300 transition-all duration-200 active:scale-95"
-        >
-          <ShieldCheck className="w-5 h-5" />
-          Analyze My Readiness
-        </button>
+        <div className="relative inline-flex flex-col items-center gap-2">
+          <button
+            onClick={isLocked ? undefined : () => navigate("/compliance-analysis")}
+            disabled={isLocked}
+            className={`inline-flex items-center gap-3 px-8 py-4 rounded-2xl text-white text-base font-bold transition-all duration-200
+              ${isLocked
+                ? "bg-slate-300 cursor-not-allowed opacity-60 shadow-none"
+                : "bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-700 hover:to-violet-800 shadow-lg shadow-violet-200 hover:shadow-violet-300 active:scale-95"}`}
+          >
+            <ShieldCheck className="w-5 h-5" />
+            Analyze My Readiness
+          </button>
+
+          {/* ── Access lock notice ── */}
+          {isLocked && (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-slate-200 shadow-sm max-w-xs text-center">
+              <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <p className="text-xs font-medium text-slate-500 leading-snug">
+                Analysis Lock Active: Please select a premium plan to activate this workspace uploader.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
     </div>
