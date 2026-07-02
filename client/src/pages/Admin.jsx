@@ -293,7 +293,14 @@ export default function Admin() {
                   <tbody className="divide-y divide-slate-100">
                     {transactions.map((tx) => (
                       <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4 font-medium text-slate-800">{tx.company_name || tx.user_id || "Unknown Company"}</td>
+                        <td className="px-6 py-4 font-medium text-slate-800">
+                          {(() => {
+                            const name = tx.company_name || tx.user_id || "Unknown Company";
+                            return name.includes("@")
+                              ? name.split("@")[0].toUpperCase() + " LTD"
+                              : name;
+                          })()}
+                        </td>
                         <td className="px-6 py-4 text-slate-600">{tx.plan_name}</td>
                         <td className="px-6 py-4 text-right font-semibold text-slate-900">
                           ₦{Number(tx.amount).toLocaleString()}
