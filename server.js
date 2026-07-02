@@ -934,19 +934,32 @@ app.get("/api/admin/stats", async (req, res) => {
   try {
     const result = await db.query(`
       SELECT
-        -- Retroactive kobo-to-Naira patch: historical rows stored raw Paystack
-        -- kobo values (≥ 500,000). If the cumulative sum exceeds that threshold
-        -- it means the column still holds kobo figures, so we divide by 100.
+        -- Global revenue: sum all successful/confirmed rows across the entire table.
+        -- Retroactive kobo-to-Naira patch: if the raw sum exceeds 500 000 the column
+        -- still holds Paystack kobo values, so divide by 100.
         CASE
-          WHEN COALESCE(SUM(amount) FILTER (WHERE payment_status = 'success'), 0) >= 500000
-          THEN (COALESCE(SUM(amount) FILTER (WHERE payment_status = 'success'), 0) / 100)
-          ELSE  COALESCE(SUM(amount) FILTER (WHERE payment_status = 'success'), 0)
+          WHEN COALESCE(
+                 (SELECT SUM(amount) FROM payments
+                  WHERE payment_status = 'success' OR payment_status = 'confirmed'), 0
+               ) >= 500000
+          THEN (COALESCE(
+                 (SELECT SUM(amount) FROM payments
+                  WHERE payment_status = 'success' OR payment_status = 'confirmed'), 0
+               ) / 100)
+          ELSE COALESCE(
+                 (SELECT SUM(amount) FROM payments
+                  WHERE payment_status = 'success' OR payment_status = 'confirmed'), 0
+               )
         END::int AS "totalRevenue",
-        COUNT(DISTINCT user_id) FILTER (WHERE payment_status = 'success')::int AS "payingCustomers",
+        -- Global paying-customer count (no company filter).
+        COUNT(DISTINCT user_id) FILTER (
+          WHERE payment_status = 'success' OR payment_status = 'confirmed'
+        )::int AS "payingCustomers",
+        -- Global transaction count.
         COUNT(*)::int AS "totalTransactions",
         ROUND(
-          COUNT(*) FILTER (WHERE payment_status = 'success') * 100.0
-          / NULLIF(COUNT(*), 0), 1
+          COUNT(*) FILTER (WHERE payment_status = 'success' OR payment_status = 'confirmed')
+          * 100.0 / NULLIF(COUNT(*), 0), 1
         )::float AS "successRate"
       FROM payments
     `);
@@ -960,20 +973,21 @@ app.get("/api/admin/stats", async (req, res) => {
 // ─── Admin: Transactions ───────────────────────────────────────────────────
 app.get("/api/admin/transactions", async (req, res) => {
   try {
+    // Return all rows globally — no company or session filters.
+    // company_name and plan_name are persisted strings written at payment time.
     const result = await db.query(
       `SELECT
          id,
-         user_id,
-         plan_name,
-         -- Per-row retroactive fix: rows that stored raw kobo (≥ 500,000) are
-         -- divided by 100 so the client always receives a Naira figure.
+         COALESCE(company_name, user_id, 'Unknown') AS company_name,
+         COALESCE(plan_name,    'Unknown Plan')      AS plan_name,
+         -- Per-row retroactive fix: rows stored in raw Paystack kobo (≥ 500,000)
+         -- are divided by 100 so the client always receives a Naira figure.
          CASE WHEN amount >= 500000 THEN amount / 100 ELSE amount END AS amount,
          payment_reference,
          payment_status,
          created_at
        FROM payments
-       ORDER BY created_at DESC
-       LIMIT 100`
+       ORDER BY created_at ASC`
     );
     res.json({ transactions: result.rows });
   } catch (err) {
