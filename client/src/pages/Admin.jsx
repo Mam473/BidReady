@@ -3,11 +3,12 @@ import { DollarSign, Users, CreditCard, TrendingUp, RefreshCw, Lock, ShieldOff, 
 
 const STORAGE_KEY = "bidready_admin_token";
 
-// Direct-to-backend base URL — bypasses Vite proxy on Replit where the
-// internal proxy tunnel can silently drop admin requests.
+// Dynamic base URL: empty string on Replit (relative URLs go through Vite proxy),
+// direct port on local dev where the browser can reach localhost:3001 directly.
 const API_BASE = window.location.origin.includes("replit.dev") ||
+                 window.location.origin.includes("replit.app") ||
                  window.location.origin.includes("repl.co")
-  ? "http://localhost:3001"
+  ? ""
   : "http://localhost:3001";
 
 const STATUS_COLORS = {
